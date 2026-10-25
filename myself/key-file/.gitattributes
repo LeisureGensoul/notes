@@ -1,0 +1,5 @@
+"/**" filter=git-crypt-crypt-3LPXSJR3PXOIF3ERRW47C4APKB diff=git-crypt-crypt-3LPXSJR3PXOIF3ERRW47C4APKB -text
+.gitattributes -filter -diff
+.gitignore -filter -diff
+.gitmodules -filter -diff
+git-crypt-key.zip -filter -diff -text
