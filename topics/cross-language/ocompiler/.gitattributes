@@ -1,0 +1,5 @@
+"/**" filter=git-crypt-crypt-MRV3TXEF7E6Q7HZYL5RUKQT7QV diff=git-crypt-crypt-MRV3TXEF7E6Q7HZYL5RUKQT7QV -text
+.gitattributes -filter -diff
+.gitignore -filter -diff
+.gitmodules -filter -diff
+git-crypt-key.zip -filter -diff -text
