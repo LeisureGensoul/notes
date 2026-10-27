@@ -2,7 +2,7 @@
 
 跨语言优化减少调用, 数据转换与运行时适配开销, 并让不同语言的实现共同参与优化.
 
-本文以 Java 与 C/C++ 的交互为例. Java 侧采用托管执行, 由 ART (Android 运行时) 或 JVM (Java 虚拟机) 管理对象与执行状态. 下文将经 JNI 等接口调用的 C/C++ 实现称为 native 代码.
+本文从 Java 与 C/C++ 的交互出发, 讨论调用成本, 联合编译与解释器特化. Java 侧采用托管执行, 由 ART (Android 运行时) 或 JVM (Java 虚拟机) 管理对象与执行状态. 下文将经 JNI 等接口调用的 C/C++ 实现称为 native 代码.
 
 ## 边界与开销
 
@@ -63,13 +63,13 @@ JNI stub 是衔接两侧调用约定的适配代码, 由 [`ArtQuickJniCompileMet
 
 ## 优化路线
 
-| 方向 | 改变什么 | 主要条件 |
+| 方向 | 优化范围 | 实现与参照 |
 | --- | --- | --- |
-| [降低调用成本](#降低调用成本) | 减少调用次数或单次适配工作 | 可调整接口粒度, 或满足快速路径约束 |
-| [联合编译](#联合编译) | 让两侧实现共同参与内联与计算优化 | 函数体可见, 数据与运行时语义对齐 |
-| [解释器特化](#解释器特化) | 按已知程序化简解释器, 消除取指与分派 | 解释器代码可分析, 程序或部分输入已知 |
+| [降低调用成本](#降低调用成本) | 减少调用次数或单次适配工作 | [JNI 快速路径](#jni-快速路径), [Java FFM](#java-ffm) |
+| [联合编译](#联合编译) | 将两侧实现纳入同一 IR, 共同优化 | [ART 接入 LLVM](#art-接入-llvm), [LLVM4JNI](#llvm4jni)<br/>参照: [Falcon](#falcon) 的托管语义接入 |
+| [解释器特化](#解释器特化) | 特化互操作实现, 化简跨语言分派与适配 | [Truffle](#truffle)<br/>参照: [Weval](#weval) 的 AOT 特化 |
 
-三条路线可以组合. 解释器特化若覆盖[互操作路径](#互操作路径的特化), 也能让其中的分派与适配逻辑共同参与优化.
+三条路线可以组合.
 
 ## 降低调用成本
 
@@ -208,7 +208,7 @@ Android-LLVM 侧重迭代优化. [原型仓库](https://github.com/paschalis-mpe
 
 #### Ocompiler (OPPO 繁星编译器)
 
-Ocompiler 用于 ART 的提前编译 (AOT), 支持 **Java/native 联合优化与机器指令级 PGO**. PGO 利用执行路径, 分支频率等运行时信息 (profile) 指导优化. [ODC25 官方演讲, 1:26:40](https://ocs-cn-south1.heytapcs.com/odc/odc25_once/videos/liuchangjishu_mini.mp4#t=5200)展示了 HIR, native IR 与 profile 的合流结构.
+Ocompiler 用于 ART 的提前编译 (AOT), 支持 **Java/native 联合优化与机器指令级 PGO**. PGO 利用执行路径, 分支频率等运行时信息 (profile) 指导优化. [ODC25 官方演讲, 1:26:40](https://ocs-cn-south1.heytapcs.com/odc/odc25_once/videos/liuchangjishu_mini.mp4#t=5200)展示了 HIR, native IR 与 profile 的合流结构. [幻灯片摘录 (PDF)](assets/ocompiler-odc25-slides.pdf).
 
 ```mermaid
 flowchart TD
@@ -233,11 +233,9 @@ flowchart TD
 
 > 早期交流记录: 编译耗时约为原路径的 10 倍, ArrayMap 基础操作提速约 60%. 未附版本与统计口径, 两项数值保留为历史记录.
 
-### JVM 实现参照
-
 <a id="llvm4jni"></a>
 
-#### LLVM4JNI
+### LLVM4JNI
 
 [fastFFI](https://github.com/alibaba/fastFFI)中的 LLVM4JNI 将可支持的 LLVM bitcode 转换为 Java bytecode. 转换后的实现可与 Java 调用者共同参与 JVM 优化. 生成代码依赖 LLVM4JNI runtime, 用来衔接 native 内存等操作.
 
@@ -245,23 +243,34 @@ flowchart TD
 native 函数 → LLVM bitcode → Java bytecode → JVM 优化
 ```
 
-#### Falcon
+<a id="falcon"></a>
 
-[Falcon](https://docs.azul.com/prime/Falcon-Compiler)是 Azul Prime 基于 LLVM 的即时编译器 (JIT). 它以 Java bytecode 为输入, 在运行时根据 profile 编译热点方法.
+### Falcon: 托管语义参照
 
-Falcon 在 LLVM IR 中保留 Java 高层语义, **衔接语言相关优化与通用优化**. [FALCON: AN OPTIMIZING JAVA JIT](https://llvm.org/devmtg/2017-10/slides/Reames-FalconKeynote.pdf) (2017)介绍了相关实现:
+[Falcon](https://docs.azul.com/prime/Falcon-Compiler)是 Azul Prime 基于 LLVM 的即时编译器 (JIT), 根据 profile 编译热点 Java 方法. 它将 **Java 语义与运行时约定接入 LLVM**, 衔接语言相关优化与通用优化. [FALCON: AN OPTIMIZING JAVA JIT](https://llvm.org/devmtg/2017-10/slides/Reames-FalconKeynote.pdf) (2017)介绍了相关实现:
 
 | 层次 | 处理 |
 | --- | --- |
 | Java 语义 | 用 attributes, metadata 与 IR 抽象函数保留类型和对象操作, 支持去虚拟化与对象消除 |
 | LLVM IR | lowering 抽象操作, 暴露底层实现, 继续进行通用优化 |
-| 机器码与运行时 | 实现隐式空值检查, 衔接 GC, 去优化与混合栈遍历 |
+| 机器码与运行时 | 用[隐式空值检查](https://llvm.org/devmtg/2017-10/slides/Reames-FalconKeynote.pdf#page=23)省去显式分支, 衔接 GC, 去优化与混合栈遍历 |
+
+以接收者通常为 `A` 的虚调用 `o.foo()` 为例, 类型检查将调用收窄到已知目标 ([演讲第 21–22 页](https://llvm.org/devmtg/2017-10/slides/Reames-FalconKeynote.pdf#page=21)):
+
+```mermaid
+flowchart TD
+    A["o.foo()"] --> B{"接收者类型为 A?"}
+    B -->|是| C["直接调用 A.foo<br/>可继续内联"]
+    B -->|否| D["去优化<br/>在较低执行层继续"]
+```
+
+去优化利用记录的帧状态恢复执行, 运行时可重新收集 profile 并编译.
 
 ## 解释器特化
 
 解释器根据指令或语法节点选择并执行操作, 这个选择过程称为分派. 它所实现的语言称为 guest 语言, 用这种语言编写的程序称为 guest 程序.
 
-部分求值 (Partial Evaluation, PE)利用已知输入化简程序. 固定 guest 程序后, 可以将通用解释器化简为针对该程序的专门代码, 消去取指与分派等开销.
+部分求值 (Partial Evaluation, PE)利用已知输入化简程序. 固定 guest 程序后, 可以将通用解释器化简为针对该程序的专门代码, 消去取指与分派等开销. 特化覆盖互操作路径时, 其中的访问与调用也能共同参与优化.
 
 ### 从特化到编译
 
@@ -315,7 +324,24 @@ flowchart TD
 
 例如, 节点同时支持整数相加与字符串拼接, 但只安装了整数特化. 首次遇到字符串时, 可通过 [`transferToInterpreterAndInvalidate`](https://www.graalvm.org/truffle/javadoc/com/oracle/truffle/api/CompilerDirectives.html)返回解释器, 失效旧代码并补充特化. 去优化利用保存的执行位置与帧状态继续执行, 后续再按新状态编译.
 
-[Practical Partial Evaluation for High-Performance Dynamic Language Runtimes](https://chrisseaton.com/truffleruby/pldi17-truffle/pldi17-truffle.pdf) (PLDI 2017)展示了该机制. 下表为论文所测语言与基准, 加速比为基线耗时 / Truffle 耗时.
+#### 互操作路径的特化
+
+[Cross-Language Interoperability in a Multi-Language Runtime](https://doi.org/10.1145/3201898) (2018)将跨语言对象访问与调用表示为可特化的消息. 以 JavaScript 读取 C 结构体字段 `obj.value` 为例 ([图 7](https://chrisseaton.com/truffleruby/cross-language-interop.pdf#page=13)):
+
+```mermaid
+flowchart TD
+    A["JavaScript: a = obj.value"] --> B["通用 Read 消息"]
+    B -->|消息解析| C["TruffleC 访问节点<br/>检查接收者 + 读取结构体字段"]
+    C -->|PE + Graal 优化| D["编译代码<br/>guard + 字段加载"]
+```
+
+消息解析将 TruffleC 的访问节点接入 JavaScript 的抽象语法树 (AST), **使两侧实现共同参与优化**. 编译代码用 guard 检查接收者语言; 多种接收者语言会保留相应分派.
+
+[`@TruffleBoundary`](https://www.graalvm.org/truffle/javadoc/com/oracle/truffle/api/CompilerDirectives.TruffleBoundary.html)阻止 PE 展开方法体. `allowInlining = true` 允许后续内联阶段考虑该调用.
+
+#### 特化收益与成本
+
+[Practical Partial Evaluation for High-Performance Dynamic Language Runtimes](https://chrisseaton.com/truffleruby/pldi17-truffle/pldi17-truffle.pdf) (PLDI 2017)测量了 guest 程序预热后的执行性能. 下表加速比为基线耗时 / Truffle 耗时.
 
 | Guest 语言 | 论文基线 | 加速比 |
 | --- | --- | ---: |
@@ -323,26 +349,9 @@ flowchart TD
 | Ruby | JRuby | 3.8× |
 | R | GNU R | 5.0× |
 
-0.83× 表示这组 JavaScript 测试慢于基线. 三组结果反映当时各语言实现的表现, 不比较今天的语言运行时.
+0.83× 表示这组 JavaScript 测试慢于 V8.
 
-#### 互操作路径的特化
-
-Truffle 语言通过互操作协议交换值与调用, 让跨语言边界上的适配逻辑参与优化. [Cross-Language Interoperability in a Multi-Language Runtime](https://doi.org/10.1145/3201898)将对象访问与调用表示为可特化的消息. 以普通对象的字段读取为例:
-
-```text
-通用跨语言字段访问
-  → PE 利用稳定的类型, 布局与属性名
-  → 展开对应语言的读取实现
-  → 生成字段访问与必要的运行时检查
-```
-
-编译代码用 guard 检查特化条件; 接收者频繁变化时, 会保留更多分派与转换.
-
-[`@TruffleBoundary`](https://www.graalvm.org/truffle/javadoc/com/oracle/truffle/api/CompilerDirectives.TruffleBoundary.html)阻止 PE 展开方法体. `allowInlining = true` 允许后续内联阶段考虑该调用.
-
-#### 解释器形式与编译成本
-
-Truffle 支持抽象语法树 (AST) 与字节码两种解释器形式. [Bytecode DSL](https://www.graalvm.org/truffle/javadoc/com/oracle/truffle/api/bytecode/package-summary.html)自 24.2 起提供字节码解释器的生成与运行支持. 语言实现者定义操作及其特化, [`@GenerateBytecode`](https://www.graalvm.org/truffle/javadoc/com/oracle/truffle/api/bytecode/GenerateBytecode.html)生成字节码编码, 解释器与构建接口. guest 编译仍由 PE 完成.
+Truffle 支持 AST 与字节码两种解释器形式. [Bytecode DSL](https://www.graalvm.org/truffle/javadoc/com/oracle/truffle/api/bytecode/package-summary.html)自 24.2 起提供字节码解释器的生成与运行支持. 语言实现者定义操作及其特化, [`@GenerateBytecode`](https://www.graalvm.org/truffle/javadoc/com/oracle/truffle/api/bytecode/GenerateBytecode.html)生成字节码编码, 解释器与构建接口. guest 编译仍由 PE 完成.
 
 按每个字节码位置展开解释器时, 相同 opcode 的公共逻辑会被反复分析. [Partial-Evaluation Templates: Accelerating Partial Evaluation with Pre-compiled Templates](https://research.jku.at/en/publications/partial-evaluation-templates-accelerating-partial-evaluation-with/) (CGO 2026)将这部分工作预先整理为参数化 IR 模板:
 
@@ -373,9 +382,9 @@ Truffle 支持抽象语法树 (AST) 与字节码两种解释器形式. [Bytecode
 
 <a id="weval"></a>
 
-### Weval
+### Weval: AOT 特化参照
 
-[Partial Evaluation, Whole-Program Compilation](https://doi.org/10.1145/3729259) (PLDI 2025)将编译为 WebAssembly (Wasm) 的 C/C++ 解释器与已知 guest 字节码一起特化. 实现已迁入 [Bytecode Alliance](https://github.com/bytecodealliance/weval).
+Weval 从现有 C/C++ 解释器生成 guest 的 AOT 编译代码. [Partial Evaluation, Whole-Program Compilation](https://doi.org/10.1145/3729259) (PLDI 2025)以编译为 WebAssembly (Wasm) 的解释器与已知 guest 字节码为输入. 实现已迁入 [Bytecode Alliance](https://github.com/bytecodealliance/weval).
 
 ```text
 解释器编译为 Wasm + guest 字节码
@@ -385,18 +394,34 @@ Truffle 支持抽象语法树 (AST) 与字节码两种解释器形式. [Bytecode
   → Wasm 引擎执行
 ```
 
-普通常量传播在解释器循环头合并不同的 `pc` 值, opcode 因而难以保持为常量. Weval 利用注解区分特化上下文, 按字节码位置分别分析, 同时保留 guest 程序的分支与循环.
+普通常量传播在解释器循环头合并不同的 `pc` 值, opcode 因而难以保持为常量. Weval 通过 `weval::push_context` / `weval::update_context` 指定特化上下文, **按字节码位置分别分析** ([演讲 PDF, 第 47 页](https://cfallin.org/pubs/pldi2025_weval_slides_public.pdf#page=47)). 沿用前文的整数解释器:
 
-接入需要添加注解和适配; 输出为 Wasm, 机器码生成由 Wasm 引擎负责. guest AOT 编译无需运行时 profile, 仍可保留动态类型判断和 inline cache.
+```mermaid
+flowchart TD
+    P["固定字节码: ADD 2 → MUL 3 → RET"]
+    subgraph M["普通常量传播"]
+        M0["循环头合并 pc = 0, 1, 2"] --> M1["pc 不再是常量<br/>保留取指与分派"]
+    end
+    subgraph S["Weval: 按 pc 区分上下文"]
+        S0["pc = 0: ADD 2<br/>x = x + 2"] --> S1["pc = 1: MUL 3<br/>x = x * 3"]
+        S1 --> S2["pc = 2: RET<br/>return x"]
+    end
+    P --> M
+    P --> S
+```
 
-[论文实验](https://www.c1f.net/pubs/pldi2025_weval.pdf)报告:
+guest 程序存在分支或循环时, 连接相应上下文, 保留原有控制流 ([演讲 PDF, 第 59 页](https://cfallin.org/pubs/pldi2025_weval_slides_public.pdf#page=59)).
+
+该 AOT 路线不依赖运行时 profile, 动态类型判断与 inline cache 仍可保留.
+
+[论文实验](https://cfallin.org/pubs/pldi2025_weval.pdf)测量 guest 程序在 Wasm 上的执行性能:
 
 | 对象 | 基线 | 优化配置 | 加速比 |
 | --- | --- | --- | ---: |
-| SpiderMonkey / Octane | Wasm 上的 `Interp + ICs` | `wevaled + state` | 2.17× |
-| PUC-Rio Lua | Wasm 上的解释器 | Weval AOT | 1.84× |
+| SpiderMonkey / Octane | Wasm 上的 `Interp + ICs` | `wevaled + state` | 2.17× (几何平均) |
+| PUC-Rio Lua / 解释器密集型基准 | Wasm 上的解释器 | Weval AOT | 1.84× |
 
-SpiderMonkey 的 2.17× 同时包含分派消除与解释器状态优化. 两项结果均相对表中的 Wasm 解释器基线.
+SpiderMonkey 的 2.17× 同时包含分派消除与解释器状态优化.
 
 ### 两种特化方式
 
@@ -409,7 +434,7 @@ SpiderMonkey 的 2.17× 同时包含分派消除与解释器状态优化. 两项
 
 选择取决于 guest 程序何时可知, 以及是否需要根据执行反馈继续特化.
 
-后续可探索 AOT 特化与 profile 的结合: 提前消除稳定的解释开销, 再根据执行反馈优化动态路径.
+后续可探索互操作路径的 AOT 特化: 提前化简稳定的适配逻辑, 再结合 profile 优化动态路径.
 
 ## 收益与取舍
 
