@@ -1,0 +1,5 @@
+"/**" -filter !diff !text
+.gitattributes -filter -diff
+.gitignore -filter -diff
+.gitmodules -filter -diff
+git-crypt-key.zip -filter -diff -text
