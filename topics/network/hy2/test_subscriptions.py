@@ -1,5 +1,6 @@
 """Offline authorization, rollover, quota and subscription boundary checks."""
 import ast
+import concurrent.futures
 import contextlib
 import datetime as dt
 import importlib.util
@@ -427,6 +428,60 @@ class Subscriptions(unittest.TestCase):
                  data=json.dumps({'auth': private['password'], 'addr': '100.64.1.3:123'}).encode())
         with opener.open(request) as response:
             self.assertTrue(json.load(response)['ok'])
+
+    def test_subscription_capacity_keeps_authentication_available(self):
+        now = m.time.time()
+        private = self.grants(now)['tailscale']
+        server = m.Server(('127.0.0.1', 0), m.handler_for(self.store))
+        worker = threading.Thread(target=server.serve_forever, daemon=True)
+        worker.start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        base = 'http://127.0.0.1:' + str(server.server_port)
+        entered, release = threading.Event(), threading.Event()
+        lock = threading.Lock()
+        count = 0
+        render = self.store.render
+
+        def blocked_render(token, timestamp):
+            nonlocal count
+            with lock:
+                count += 1
+                if count == 4:
+                    entered.set()
+            if not release.wait(5):
+                raise RuntimeError('Fixture release timed out')
+            return render(token, timestamp)
+
+        def request(path, method='GET', body=None):
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+            request = urllib.request.Request(base + path, method=method, data=body)
+            with opener.open(request, timeout=3) as response:
+                return response.status, response.read()
+
+        with patch.object(self.store, 'render', side_effect=blocked_render):
+            with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+                futures = [pool.submit(request, '/all.yaml') for _ in range(4)]
+                try:
+                    self.assertTrue(entered.wait(2))
+                    for method in ('GET', 'HEAD'):
+                        with self.assertRaises(urllib.error.HTTPError) as error:
+                            request('/all.yaml', method)
+                        self.assertEqual(error.exception.code, 503)
+                    status, body = request('/auth', 'POST', json.dumps({
+                        'auth': private['password'], 'addr': '100.64.1.3:123',
+                    }).encode())
+                    self.assertEqual(status, 200)
+                    self.assertTrue(json.loads(body)['ok'])
+                finally:
+                    release.set()
+                self.assertTrue(all(f.result()[0] == 200 for f in futures))
+        self.assertEqual(request('/all.yaml')[0], 200)
+        for _ in range(5):
+            with self.assertRaises(urllib.error.HTTPError) as error:
+                request('/s/invalid/clash.yaml')
+            self.assertEqual(error.exception.code, 404)
+        self.assertEqual(request('/all.yaml', 'HEAD')[0], 200)
 
     def test_output_keeps_shared_dns_rules_and_manual_tun(self):
         config = yaml.safe_load(self.store.render(None, self.now))

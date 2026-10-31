@@ -306,6 +306,9 @@ def handler_for(store):
                 self.wfile.write(payload)
 
         def do_GET(self):
+            if not self.server.subscription_slots.acquire(blocking=False):
+                self.send(503)
+                return
             try:
                 if self.path == '/all.yaml':
                     token = None
@@ -321,6 +324,8 @@ def handler_for(store):
                 self.send(404)
             except Exception:
                 self.send(503)
+            finally:
+                self.server.subscription_slots.release()
 
         do_HEAD = do_GET
 
@@ -357,6 +362,7 @@ class Server(ThreadingHTTPServer):
 
     def __init__(self, address, handler):
         self.slots = threading.BoundedSemaphore(32)
+        self.subscription_slots = threading.BoundedSemaphore(4)
         super().__init__(address, handler)
 
     def process_request(self, request, address):

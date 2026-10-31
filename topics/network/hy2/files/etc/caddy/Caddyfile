@@ -2,6 +2,11 @@
 	auto_https off
 	servers {
 		protocols h1 h2
+		timeouts {
+			read_header 5s
+			write 10s
+			idle 30s
+		}
 	}
 	log {
 		format filter {
@@ -32,7 +37,12 @@ https://CHANGE_PUBLIC_IP {
 		path_regexp subscription ^/s/[A-Za-z0-9_-]{43}/clash[.]yaml$
 	}
 	handle @subscription {
-		reverse_proxy 127.0.0.1:9091
+		reverse_proxy 127.0.0.1:9091 {
+			unhealthy_request_count 4
+			transport http {
+				response_header_timeout 5s
+			}
+		}
 	}
 	handle {
 		respond 404
