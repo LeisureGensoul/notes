@@ -1,0 +1,11 @@
+listen: CHANGE_TAILNET_IP:8443
+tls:
+  cert: /etc/hysteria/server.crt
+  key: /etc/hysteria/server.key
+auth:
+  type: password
+  password: CHANGE_HY2_PASSWORD
+obfs:
+  type: gecko
+  gecko:
+    password: CHANGE_GECKO_PASSWORD

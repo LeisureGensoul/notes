@@ -1,0 +1,18 @@
+[Unit]
+PartOf=tailscaled.service
+Description=Tailnet Hysteria2 proxy
+After=tailscaled.service hysteria-firewall.service
+Requires=tailscaled.service hysteria-firewall.service
+[Service]
+ExecStart=/usr/local/bin/hysteria server -c /etc/hysteria/config.yaml
+User=hysteria
+Group=hysteria
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

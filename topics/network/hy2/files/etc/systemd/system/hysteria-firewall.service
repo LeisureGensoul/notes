@@ -1,0 +1,8 @@
+[Unit]
+After=systemd-sysctl.service
+Description=Tailnet-only HY2 access guard
+Before=hysteria.service
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/nft -f /etc/nftables.d/hysteria.nft
+RemainAfterExit=yes

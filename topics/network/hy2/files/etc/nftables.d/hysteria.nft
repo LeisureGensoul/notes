@@ -1,0 +1,8 @@
+add table inet hysteria
+flush table inet hysteria
+table inet hysteria {
+ chain input {
+  type filter hook input priority -11; policy accept;
+  ip daddr CHANGE_TAILNET_IP udp dport 8443 iifname != "tailscale0" iifname != "lo" counter drop
+ }
+}
