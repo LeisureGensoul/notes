@@ -1,0 +1,12 @@
+public_host: CHANGE_PUBLIC_IP
+tailnet_ip: CHANGE_TAILNET_IP
+port: 8443
+timezone: Asia/Singapore
+obfs_password: CHANGE_GECKO_PASSWORD
+state: /data/network/subscriptions/state.sqlite3
+stats_url: http://127.0.0.1:9092
+stats_secret: CHANGE_STATS_SECRET
+poll_seconds: 5
+limits:
+  large: 70000000000
+  small: 2000000000

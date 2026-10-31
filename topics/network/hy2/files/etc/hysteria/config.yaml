@@ -1,11 +1,34 @@
-listen: CHANGE_TAILNET_IP:8443
+listen: 0.0.0.0:8443
 tls:
-  cert: /etc/hysteria/server.crt
-  key: /etc/hysteria/server.key
+  cert: /data/network/tls/fullchain.pem
+  key: /data/network/tls/privkey.pem
 auth:
-  type: password
-  password: CHANGE_HY2_PASSWORD
+  type: http
+  http:
+    url: http://127.0.0.1:9091/auth
 obfs:
   type: gecko
   gecko:
     password: CHANGE_GECKO_PASSWORD
+trafficStats:
+  listen: 127.0.0.1:9092
+  secret: CHANGE_STATS_SECRET
+acl:
+  inline:
+  - reject(0.0.0.0/8)
+  - reject(10.0.0.0/8)
+  - reject(100.64.0.0/10)
+  - reject(127.0.0.0/8)
+  - reject(169.254.0.0/16)
+  - reject(172.16.0.0/12)
+  - reject(192.168.0.0/16)
+  - reject(224.0.0.0/4)
+  - reject(240.0.0.0/4)
+  - reject(::/128)
+  - reject(::1/128)
+  - reject(fc00::/7)
+  - reject(fe80::/10)
+  - reject(ff00::/8)
+  - reject(CHANGE_PUBLIC_IP)
+  - reject(CHANGE_PUBLIC_IPV6)
+  - direct(all)

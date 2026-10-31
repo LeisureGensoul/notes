@@ -1,0 +1,19 @@
+[Unit]
+Description=HY2 scoped subscriptions and authorization
+After=network-online.target
+Wants=network-online.target hysteria.service
+
+[Service]
+User=hy2-subscriptions
+Group=hy2-subscriptions
+ExecStart=/usr/bin/python3 -B /usr/local/lib/hysteria/subscriptions.py serve /etc/hy2-subscriptions/config.yaml
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/data/network/subscriptions
+
+[Install]
+WantedBy=multi-user.target

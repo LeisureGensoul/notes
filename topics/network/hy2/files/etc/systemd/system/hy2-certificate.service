@@ -1,0 +1,8 @@
+[Unit]
+Description=Renew public IP certificate
+After=network-online.target caddy.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/data/network/certbot/bin/certbot renew --reuse-key --quiet --no-random-sleep-on-renew --config-dir /data/network/acme/config --work-dir /data/network/acme/work --logs-dir /data/network/acme/logs --deploy-hook /usr/local/lib/hysteria/deploy-certificate.sh

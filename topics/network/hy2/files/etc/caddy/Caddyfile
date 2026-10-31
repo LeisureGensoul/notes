@@ -1,0 +1,40 @@
+{
+	auto_https off
+	servers {
+		protocols h1 h2
+	}
+	log {
+		format filter {
+			wrap json
+			fields {
+				request>uri replace REDACTED
+				request>headers>Referer replace REDACTED
+				request>headers>Authorization delete
+			}
+		}
+	}
+}
+http://CHANGE_PUBLIC_IP {
+	bind CHANGE_PUBLIC_IP
+	handle /.well-known/acme-challenge/* {
+		root * /data/network/acme-webroot
+		file_server
+	}
+	handle {
+		respond 404
+	}
+}
+https://CHANGE_PUBLIC_IP {
+	bind CHANGE_PUBLIC_IP
+	tls /data/network/tls/fullchain.pem /data/network/tls/privkey.pem
+	@subscription {
+		method GET HEAD
+		path_regexp subscription ^/s/[A-Za-z0-9_-]{43}/clash[.]yaml$
+	}
+	handle @subscription {
+		reverse_proxy 127.0.0.1:9091
+	}
+	handle {
+		respond 404
+	}
+}

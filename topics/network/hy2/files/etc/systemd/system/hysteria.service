@@ -1,8 +1,9 @@
 [Unit]
-PartOf=tailscaled.service
-Description=Tailnet Hysteria2 proxy
-After=tailscaled.service hysteria-firewall.service
-Requires=tailscaled.service hysteria-firewall.service
+Description=Tailnet and public Hysteria2 proxy
+After=network-online.target hy2-subscriptions.service hysteria-firewall.service
+Wants=network-online.target
+Requires=hy2-subscriptions.service hysteria-firewall.service
+
 [Service]
 ExecStart=/usr/local/bin/hysteria server -c /etc/hysteria/config.yaml
 User=hysteria

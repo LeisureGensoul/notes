@@ -1,4 +1,4 @@
-"""Build a Mihomo configuration from the Hysteria2 server configuration."""
+"""Build a Mihomo configuration from the scoped authorization state."""
 import argparse
 import os
 import tempfile
@@ -7,19 +7,20 @@ from pathlib import Path
 import yaml
 
 
-def build(server):
-    address, port = server['listen'].rsplit(':', 1)
-    node = {
-        'name': 'Singapore',
-        'type': 'hysteria2',
-        'interface-name': 'Tailscale',
-        'server': address.strip('[]'),
-        'port': int(port),
-        'password': server['auth']['password'],
-        'skip-cert-verify': True,
-        'obfs': server['obfs']['type'],
-        'obfs-password': server['obfs']['gecko']['password'],
-    }
+def build_nodes(nodes, grants):
+    """Build scoped proxy groups with shared routing and DNS configuration."""
+    branches = {}
+    if len(nodes) > 1:
+        for node, grant in zip(nodes, grants):
+            if grant['tier'] == 'tailscale':
+                group = 'Tailscale'
+            else:
+                family = (grant['parent'] or grant['name']).rsplit('-', 1)[1]
+                group = 'Large ' + family
+            branches.setdefault(group, []).append(node['name'])
+    groups = [{'name': group, 'type': 'select', 'proxies': members}
+              for group, members in branches.items()] if len(branches) > 1 else []
+    choices = list(branches) if groups else [node['name'] for node in nodes]
     return {
         'mixed-port': 7890,
         'allow-lan': False,
@@ -47,8 +48,8 @@ def build(server):
                 'rule-set:cn-domain': ['223.5.5.5'],
             },
         },
-        'proxies': [node],
-        'proxy-groups': [{'name': 'Overseas', 'type': 'select', 'proxies': [node['name']]}],
+        'proxies': nodes,
+        'proxy-groups': [{'name': 'Overseas', 'type': 'select', 'proxies': choices}] + groups,
         'rule-providers': {
             'cn-domain': {
                 'type': 'http',
@@ -91,16 +92,27 @@ def build(server):
 
 
 def main():
+    import time
+    from subscriptions import Store
+
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('server_config', type=Path)
+    parser.add_argument('config', type=Path)
     parser.add_argument('output', type=Path)
+    parser.add_argument('--scope', help='Export one large or small grant instead of the Tailnet scope')
     args = parser.parse_args()
-    config = build(yaml.safe_load(args.server_config.read_text()))
-    # Replace the complete file atomically while subscription readers use it.
+    store = Store(yaml.safe_load(args.config.read_text()))
+    now = time.time()
+    token = None
+    if args.scope:
+        grant = next((g for g in store.selected(None, now) if g['name'] == args.scope and g['token']), None)
+        if grant is None:
+            parser.error('Scope must name an enabled large or small grant')
+        token = grant['token']
+    body = store.render(token, now)
     fd, temporary = tempfile.mkstemp(dir=args.output.parent)
     try:
         with os.fdopen(fd, 'w', encoding='utf-8') as stream:
-            yaml.safe_dump(config, stream, sort_keys=False, allow_unicode=True)
+            stream.write(body)
         os.replace(temporary, args.output)
     finally:
         Path(temporary).unlink(missing_ok=True)

@@ -1,0 +1,10 @@
+[Unit]
+Description=Check public IP certificate renewal every six hours
+
+[Timer]
+OnCalendar=*-*-* 00,06,12,18:00:00
+Persistent=true
+Unit=hy2-certificate.service
+
+[Install]
+WantedBy=timers.target
