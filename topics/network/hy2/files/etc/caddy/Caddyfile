@@ -34,7 +34,7 @@ https://CHANGE_PUBLIC_IP {
 	tls /data/network/tls/fullchain.pem /data/network/tls/privkey.pem
 	@subscription {
 		method GET HEAD
-		path_regexp subscription ^/s/[A-Za-z0-9_-]{43}/clash[.]yaml$
+		path_regexp subscription ^/s/[A-Za-z0-9_-]{43}/(clash|nodes)[.]yaml$
 	}
 	handle @subscription {
 		reverse_proxy 127.0.0.1:9091 {

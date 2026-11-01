@@ -4,7 +4,7 @@
 
 ## 接入与授权
 
-同一个 HY2 实例提供 Tailnet 和公网接入. 内网订阅返回 21 个节点, 公网订阅按 token 返回对应范围. 每次请求直接返回完整 YAML, 不拉取下级订阅.
+同一个 HY2 实例提供 Tailnet 和公网接入. 内网订阅返回 21 个节点, 公网订阅按 token 返回对应范围.
 
 | 入口 | 返回节点 | 换代与额度 |
 | --- | --- | --- |
@@ -12,9 +12,7 @@
 | large-token | 对应 large 和四个 small | large 每周换代, 每个 70 GB/周 |
 | small-token | 对应 small | small 每天换代, 每个 2 GB/天 |
 
-四组授权名为 `large-A` 至 `large-D`, 下级分别为 `small-A1` 至 `small-D4`. 授权名保持稳定, 订阅 token 和 HY2 密码分别生成.
-
-节点使用固定名称 `tailscale`, `large-A` 和 `small-A1` 等. token 与密码换代不改变节点名.
+节点名为 `tailscale`, `large-A` 至 `large-D`, `small-A1` 至 `small-D4`. 订阅 token 与 HY2 密码独立生成, 换代不改变节点名.
 
 时间使用 Asia/Singapore, UTC+8. 每天 00:00 更新 small, 每周一 00:00 同时更新 large 和全部 small. 首次签发使用当前周期的剩余时间. 不设重叠期.
 
@@ -22,7 +20,9 @@
 
 旧 token 到期后返回 404, 旧 HY2 密码拒绝认证. 服务每 5 秒检查已有会话, 断开到期或额度耗尽的连接, 失败后重试. large 到期或撤销时, 对应四个 small 一并失效.
 
-额度按凭据身份独立累计, 经 Tailnet 使用 large 或 small 也不豁免. 上传与下载合计. 1 GB = 1,000,000,000 字节. small 按日重置, large 按周重置; 刷新, 恢复授权和服务重启不清零当期用量. 暂不限速. large 额度用尽不扣减下级额度, 其有效 token 仍可读取下级配置.
+额度按凭据身份独立累计, 上传与下载合计. 1 GB = 1,000,000,000 字节. 经 Tailnet 使用 large 或 small 也计入额度, 暂不限速.
+
+small 按日重置, large 按周重置. 刷新, 恢复授权和服务重启不清零当期用量. large 额度用尽不扣减下级额度, 其有效 token 仍可读取下级配置.
 
 流量统计来自 HY2 转发数据, 与服务商计费口径不同. 配额及会话撤销存在轮询延迟, 不能作为逐字节的账单硬上限. 统计超过 15 秒未成功时, 暂停公网新认证并清理已有公网会话; Tailnet 认证不依赖额度统计.
 
@@ -31,13 +31,16 @@
 - `subscriptions.py`: 本机订阅与认证服务. SQLite 保存唯一授权状态, 完整事务统一协调换代与记账. 统计与会话清理独立执行. 每轮根据在线身份与有效授权清理旧会话, 失败后重新计算并重试.
 - `build-config.py`: 共用 DNS 与分流生成逻辑, 支持导出订阅快照.
 - Tailscale Serve: 将内网订阅映射到本机服务的 `/all.yaml`.
-- Caddy: 公网 HTTPS 只转发 `/s/<token>/clash.yaml`, 其余路径返回 404.
+- Caddy: 公网 HTTPS 提供 `/s/<token>/clash.yaml` 完整配置和 `/s/<token>/nodes.yaml` 节点数据, 其余路径返回 404.
 - Certbot: 自动续期可信 IP 证书. 证书更新后重新加载 Caddy, HY2 在握手时读取证书.
 
-公网 HTTPS 与 HY2 共用一份可信 IP 证书. 客户端正常验证证书, 不使用 `skip-cert-verify`. `tailscale` 节点连接 Tailnet IP, 使用公网 IP 作为证书验证名称.
+HY2 可访问公网目标. 对服务器自身, 仅放行 TCP 22 和 443, 分别连接 OpenSSH 和公网 HTTPS 订阅. 本机 Tailnet IPv4/IPv6 的 TCP 22 映射到公网 OpenSSH. 其他本机, Tailnet, 私网及元数据地址拒绝访问.
+
+公网 HTTPS 与 HY2 共用一份可信 IP 证书. 客户端正常验证证书. `tailscale` 节点连接 Tailnet IP, 使用公网 IP 作为证书验证名称.
 
 | 端口 | 范围 | 用途 |
 | --- | --- | --- |
+| TCP 22 | 公网与 Tailnet | OpenSSH / Tailscale SSH |
 | UDP 8443 | 公网与 Tailnet IPv4 | HY2 |
 | TCP 443 | 公网 IPv4 | token 订阅 |
 | TCP 80 | 公网 IPv4 | IP 证书验证路径, 其他请求返回 404 |
@@ -49,7 +52,7 @@
 
 ## 首次部署
 
-环境为 Ubuntu 22.04, systemd, Linux amd64. 先完成 Tailscale 部署. 以下命令使用 root Bash, 在本文件所在的 `hy2` 目录依次执行.
+环境为 Ubuntu 22.04, systemd, Linux amd64. 先完成 Tailscale 部署并确认 OpenSSH 公钥登录可用. 以下命令使用 root Bash, 在本文件所在的 `hy2` 目录依次执行.
 
 需要 Tailscale 1.104.4, Hysteria2 2.13.0, Caddy 2.11.7, Certbot 5.9.0. 客户端支持 Hysteria2 和 Gecko, 参考内核 Mihomo 1.19.32.
 
@@ -99,7 +102,10 @@ import yaml
 
 stage = Path(os.environ['HY2_STAGE'])
 address = str(ipaddress.IPv4Address(os.environ['HY2_PUBLIC_IP']))
-tailnet = subprocess.check_output(['tailscale', 'ip', '-4'], text=True).strip()
+device = json.loads(subprocess.check_output(['tailscale', 'status', '--json'], text=True))['Self']
+tailnet = next(ip for ip in device['TailscaleIPs'] if ':' not in ip)
+tailnet_v6 = next(ip for ip in device['TailscaleIPs'] if ':' in ip)
+tailnet_name = device['DNSName'].split('.')[0]
 for user in ('hysteria', 'caddy', 'hy2-subscriptions'):
     if subprocess.run(['id', user], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode:
         subprocess.run(['useradd', '--system', '--no-create-home', '--home-dir', '/nonexistent',
@@ -125,8 +131,10 @@ for path, owner, group, mode in (
     os.chown(target, pwd.getpwnam(owner).pw_uid, grp.getgrnam(group).gr_gid)
 addresses = json.loads(subprocess.check_output(['ip', '-j', '-6', 'addr', 'show', 'scope', 'global'], text=True))
 public_v6 = [a['local'] for interface in addresses for a in interface['addr_info']
-             if ipaddress.ip_address(a['local']).is_global]
+             if a.get('local') and ipaddress.ip_address(a['local']).is_global]
 replacements = {'CHANGE_PUBLIC_IP': address, 'CHANGE_TAILNET_IP': tailnet,
+                'CHANGE_TAILNET_IPV6': tailnet_v6, 'CHANGE_TAILNET_NAME': tailnet_name,
+                'CHANGE_TAILNET_FQDN': device['DNSName'].rstrip('.'),
                 'CHANGE_GECKO_PASSWORD': secrets.token_urlsafe(32),
                 'CHANGE_STATS_SECRET': secrets.token_urlsafe(32)}
 if public_v6:
@@ -209,48 +217,119 @@ Tailnet 访问策略允许客户端访问 TCP 18080 和 UDP 8443. 永久 `tailsc
 
 ## 客户端使用
 
-按订阅入口导入配置:
+- 内网: 连接 Tailscale, 导入 `tailscale serve status` 返回的 `/clash.yaml` 地址.
+- 公网: 使用有效的 HTTPS 分享链接直接导入, 首次导入不需要 Tailscale 或 HY2.
 
-- 内网: 连接 Tailscale, 添加 `tailscale serve status` 返回的 `/clash.yaml` 地址. 在 `Overseas` 中选择分组, 再选节点.
-- 公网: 直接添加收到的 HTTPS 分享链接, 无需连接 Tailscale. large 在 `Overseas` 中直接列出五个节点, small 只列出自身.
+下载并启用配置后, 按需选择接管方式:
 
-下载并激活配置后, 按需开启 TUN. 关闭 TUN 时使用系统或应用代理.
+| 方式 | 接管范围 |
+| --- | --- |
+| Clash 系统代理 | 遵循系统代理设置的应用 |
+| Clash TUN | 路由内的 TCP/UDP 流量 |
+| Tailscale exit node | 默认公网流量, 使用 Tailscale 原生传输 |
 
-内网配置保留 `Tailscale` 和 `Large A` 至 `Large D` 五组. 每个 Large 组包含自身及四个 small.
+Clash 的两种接管方式共用规则模式, 使用时关闭 exit node. 选择 `tailscale` 节点须保持 Tailscale 连接, 公网节点无需连接 Tailscale. 单独使用 exit node 时关闭 Clash 系统代理和 TUN, 操作见 [Tailscale 使用](../tailscale/setup.md#5-客户端使用).
 
-YAML 顶部按 Large 分组列出分享链接, small 缩进显示. 内网包含全部链接, large 包含自身及四个 small, small 仅包含自身. 复制完整链接即可分享. 配置各节之间留空行.
+客户端保留订阅的 hosts, DNS 和 TUN 路由设置. Tailnet 出站接口见 [设备分流](#tailnet-设备分流), 公网 HY2 节点不绑定接口.
 
-订阅只返回所属范围的信息. 公网 HTTP 不提供订阅, HTTPS 仅接受正确的 token 路径. 响应禁止缓存, 请求路径不写入访问日志.
+内网配置包含 `Large A` 至 `Large D` 和 `Tailscale` 五个分组. 首次启用默认选择 `Large A`, 客户端可保留之前的选择. 分组为手动选择, 不自动检查节点有效性.
 
-内外网订阅共用 4 个并发处理名额, 超额返回 503. 后端总连接上限为 32, HY2 认证不占用订阅名额. 公网入口也限制上游并发为 4, 等待响应头最多 5 秒. 这些限制控制请求占用, 不限定 CPU 或带宽比例.
+每个 Large 组包含一个内置 large 和四个 small. small 来自节点集合 `small-A` 至 `small-D`. large 公网配置包含自身和四个 small, small 公网配置只包含自身.
 
-支持自动刷新并应用配置的客户端可开启定时更新. small 到期后从有效 large 或内网重新获取链接; large 到期后从内网重新获取. 旧链接不能自行续期.
+### 分流与 DNS
 
-| 使用模式 | TUN | Tailscale |
+- 国内域名: 直连, 使用国内 DNS.
+- 其余域名: 通过 HY2 解析和访问.
+- 纯 IP 请求: 国内 IP 直连, 其余通过 HY2.
+- 局域网地址: 本地直连.
+- Tailnet 设备: 名单内的业务走 HY2, 其他设备走 Tailscale 原生连接.
+- `.lan` 和 `.local`: 使用系统配置的 DNS, 解析后直连. 该 DNS 须能解析这些名称.
+- Tailnet 名称: 名单内使用生成的地址映射, 其他名称使用 Tailscale DNS.
+
+`cn-domain` 同时用于域名分流和 DNS, `cn-ip` 仅用于纯 IP 分流. 未识别的域名不因解析结果命中国内 IP 而改为直连.
+
+两个 [MetaCubeX 规则集](https://github.com/MetaCubeX/meta-rules-dat/tree/meta/geo) 通过所选 HY2 下载, 每 24 小时更新.
+
+业务与国外 DNS 使用 `Overseas` 当前所选节点. 关闭 Tailscale 前, 先切换到可用的 large 或 small. HY2 失败时不自动改为直连.
+
+公网 HY2 的承载出口由客户端内核选择.
+
+### Tailnet 设备分流
+
+在 [授权配置](files/etc/hy2-subscriptions/config.yaml) 的 `hy2_devices` 中维护走 HY2 的设备. 当前只有 Singapore, 未列出的设备使用 Tailscale 原生连接.
+
+- `addresses`: 设备的 Tailnet IPv4 和 IPv6.
+- `names`: 短名和完整 MagicDNS 名称.
+- `direct_tcp_ports`: 保留原生连接的 TCP 端口. Singapore 的 18080 用于完整内网订阅.
+
+生成器统一生成地址映射, 分流规则和 TUN 主机路由. 删除设备条目即恢复原生连接, 空名单写为 `hy2_devices: {}`. 修改后更新并启用整份订阅.
+
+`tailnet_interface` 指定客户端 Tailscale 接口, 当前为 `Tailscale`. 内置 `tailnet-direct` 出站与 `tailscale` HY2 节点共用此接口. `tailnet-direct` 只承载原生访问和 Tailnet DNS, 不列入 HY2 选择组.
+
+服务端访问权限由 [HY2 ACL](files/etc/hysteria/config.yaml) 管理. 新设备须有可达路径和对应服务许可.
+
+### SSH 与文件传输
+
+在客户端选择有效的 HY2 节点, 开启 TUN 并关闭 exit node. 替换服务器的公网 IPv4, Tailnet IPv4 和客户端私钥路径:
+
+```bash
+ssh -o HostKeyAlias=SERVER_PUBLIC_IP -i /path/to/private-key root@SERVER_TAILNET_IP
+```
+
+`HostKeyAlias` 使用公网 OpenSSH 的主机密钥记录, 与原生 Tailscale SSH 区分. 目标也可使用设备名单中的 IPv6, MagicDNS 名称或公网 IPv4.
+
+VS Code Remote SSH 和 SFTP 使用相同的地址, 私钥和 `HostKeyAlias`.
+
+选择 `tailscale` 时, SSH 经 HY2 over Tailscale; 选择 large 或 small 时使用公网 HY2 并计入对应额度. 所有 HY2 授权共用这条 SSH 出站许可, 登录仍由 OpenSSH 公钥认证控制.
+
+仅开启系统代理时, 在 SSH 中配置 `ProxyCommand` 连接本机代理. 原生 Tailscale SSH 见 [Tailscale 使用](../tailscale/setup.md#5-客户端使用).
+
+### 更新与分享
+
+整份订阅由客户端下载, 启用代理后的下载路径取决于客户端的订阅更新设置. 内网订阅更新需要连接 Tailscale.
+
+| 配置来源 | small 节点更新 | 到期处理 |
 | --- | --- | --- |
-| `tailscale` HY2 | 按需 | 保持连接 |
-| large 或 small HY2 | 按需 | 使用期间无需连接 |
-| 获取完整内网订阅 | 不依赖 | 需要连接 |
-| exit node | 关闭 | 选择服务器作为出口 |
+| 内网完整订阅 | 四个 provider 分别经对应 large 更新 | large 到期后, 连接 Tailscale 更新并启用整份订阅 |
+| large 分享链接 | 一个 provider 经该 large 更新四个 small | large 到期后, 向分享者获取新 large 链接并导入 |
+| small 分享链接 | 无 provider | small 到期后, 向分享者获取新 small 链接并导入 |
 
-配置不指定 `tun.enable`. 直接运行 Mihomo 内核时自行设置开关, 使用 `mihomo -t -f clash.yaml` 校验.
+provider 每 12 小时通过内置 large 获取节点数据, 与 `Overseas` 当前选择无关. 更新不依赖 small 的有效性, 流量计入该 large. large 须有效, 有余额且可连接.
 
-DNS 和分流共用一套规则: Tailnet 和内网直连, `.ts.net` 使用 Tailscale DNS. 国内域名使用国内 DNS 并直连; 其余域名经所选 HY2 查询 DNS, 再匹配国内 IP, 未命中则走 HY2.
+首次导入自带当前节点数据. provider 只更新节点; DNS, 分流和 TUN 设置随整份订阅更新.
 
-`cn-domain` 同时用于域名分流和 DNS, `cn-ip` 用于 IP 分流. 两个 [MetaCubeX 规则集](https://github.com/MetaCubeX/meta-rules-dat/tree/meta/geo) 通过所选 HY2 下载, 每 24 小时更新.
+provider 中的 small 换代后, 到下一次成功更新前最多约 12 小时不可用. 网络失败或内核停止会延长等待. 永久 `tailscale` 节点不依赖公网凭据换代.
+
+provider 更新失败不自动直连. 使用仍有效的分享链接时, 可关闭代理后更新整份配置.
+
+内网完整配置的 YAML 顶部附带 Tailnet 订阅地址. 分享链接按 Large 分组, small 缩进显示. 链接是生成时快照; 节点数据响应包含当日 small 链接. 节点名称固定, 不显示 token.
+
+### 客户端更新操作
+
+| 客户端 | 整份订阅更新 | small 节点集合更新, 通过 large 的 HY2 |
+| --- | --- | --- |
+| Clash Verge Rev | 订阅 -> 当前订阅 -> 更新 | 代理 -> 代理集合 -> 对应集合右侧刷新按钮 |
+| FlClash v0.8.92 | 配置 -> 当前配置 -> 更新 | 代理 -> 右上角菜单 -> 提供者 / Providers -> 对应集合 -> 同步 |
+
+内网配置更新 `small-A` 至 `small-D`; large 分享配置更新自己的集合. 在集合页面查看最近更新时间.
+
+手机通过 Tailscale 获取完整配置后, 切换 FlClash 使用公网节点. 两个 VPN 无需同时运行. 系统停止内核后, 自动更新停止.
+
+界面参考: [Clash Verge Rev](https://github.com/clash-verge-rev/clash-verge-rev/blob/main/src/components/proxy/provider-button.tsx), [FlClash v0.8.92](https://github.com/chen08209/FlClash/blob/v0.8.92/lib/views/proxies/proxies.dart). 其他版本的入口可能不同.
 
 ## 更新与管理
 
-在 `hy2` 目录更新代码, 不初始化授权状态:
+在 `/etc/hy2-subscriptions/config.yaml` 调整设备名单或客户端接口. 在 `hy2` 目录更新代码并加载配置, 不初始化授权状态:
 
 ```bash
-python3 -B test_subscriptions.py
 install -m 0644 subscriptions.py build-config.py /usr/local/lib/hysteria/
 systemctl restart hy2-subscriptions
 systemctl start hysteria
 ```
 
-查看授权状态, 输出不包含密码和 token:
+修改 HY2 访问规则后, 执行 `systemctl restart hysteria` 加载配置.
+
+查看授权状态:
 
 ```bash
 python3 -B /usr/local/lib/hysteria/subscriptions.py status /etc/hy2-subscriptions/config.yaml
@@ -268,43 +347,15 @@ python3 -B /usr/local/lib/hysteria/subscriptions.py revoke /etc/hy2-subscription
 python3 -B /usr/local/lib/hysteria/subscriptions.py restore /etc/hy2-subscriptions/config.yaml small-A1
 ```
 
-需要本地文件时导出当前内网快照. token 到期后快照不会自动更新:
+需要本地文件时导出配置, `--snapshot` 从临时数据库副本生成, 不改变运行授权状态:
 
 ```bash
 install -d -m 0700 /root/client-config-export
 python3 -B /usr/local/lib/hysteria/build-config.py \
-  /etc/hy2-subscriptions/config.yaml /root/client-config-export/clash.yaml
+  /etc/hy2-subscriptions/config.yaml /root/client-config-export/clash.yaml --snapshot
 ```
 
 导出一个 large 或 small 时, 在命令末尾加 `--scope large-A` 或对应名称.
-
-## 验收
-
-```bash
-systemctl is-active hysteria hy2-subscriptions caddy hy2-certificate.timer
-systemctl is-enabled hysteria hy2-subscriptions caddy hy2-certificate.timer
-tailscale serve status
-ss -ltnup
-```
-
-确认服务正常, 监听范围与端口表一致. 配额统计和旧会话清理错误记录在 `journalctl -u hy2-subscriptions`, 不记录 token 和密码.
-
-在客户端确认:
-
-- 内网, large 和 small 订阅分别返回 21, 5, 1 个节点, 仅包含授权范围内的节点和凭据.
-- 内外网 HY2 均正常校验证书并可访问小型网页, 永久 Tailnet 凭据不能从公网认证.
-- 国内网站命中 `DIRECT`, 其余流量按所选 HY2 节点处理.
-- 换代后旧订阅失效, 旧连接被清理, 累计额度不会被刷新或重启清零.
-
-验收 TUN 时, 保持 exit node 关闭. 在 Windows PowerShell 执行 `curl.exe --fail --noproxy "*" --connect-timeout 5 --max-time 10 https://example.com/`, 并在 Clash 连接记录中确认该请求由 TUN 接管且命中 `Overseas`.
-
-证书续期演练不替换生产证书:
-
-```bash
-/data/network/certbot/bin/certbot renew --dry-run --reuse-key --cert-name hy2-ip \
-  --no-random-sleep-on-renew --config-dir /data/network/acme/config \
-  --work-dir /data/network/acme/work --logs-dir /data/network/acme/logs
-```
 
 ## 官方资料
 
@@ -313,3 +364,7 @@ ss -ltnup
 - [Hysteria2 ACL](https://v2.hysteria.network/docs/advanced/ACL/)
 - [可信 IP 证书与 Certbot](https://letsencrypt.org/2026/03/11/shorter-certs-certbot)
 - [Tailscale Serve](https://tailscale.com/docs/reference/tailscale-cli/serve)
+- [Mihomo proxy-providers](https://wiki.metacubex.one/config/proxy-providers/)
+- [Mihomo 系统 DNS](https://wiki.metacubex.one/config/dns/type/#system)
+- [Clash 系统代理与 TUN](https://www.clashverge.dev/guide/term.html)
+- [OpenSSH ProxyCommand](https://man.openbsd.org/ssh_config#ProxyCommand)

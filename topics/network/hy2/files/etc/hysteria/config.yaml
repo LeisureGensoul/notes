@@ -15,6 +15,8 @@ trafficStats:
   secret: CHANGE_STATS_SECRET
 acl:
   inline:
+  - direct(CHANGE_TAILNET_IP, tcp/22, CHANGE_PUBLIC_IP)
+  - direct(CHANGE_TAILNET_IPV6, tcp/22, CHANGE_PUBLIC_IP)
   - reject(0.0.0.0/8)
   - reject(10.0.0.0/8)
   - reject(100.64.0.0/10)
@@ -29,6 +31,8 @@ acl:
   - reject(fc00::/7)
   - reject(fe80::/10)
   - reject(ff00::/8)
+  - direct(CHANGE_PUBLIC_IP, tcp/22)
+  - direct(CHANGE_PUBLIC_IP, tcp/443)
   - reject(CHANGE_PUBLIC_IP)
   - reject(CHANGE_PUBLIC_IPV6)
   - direct(all)

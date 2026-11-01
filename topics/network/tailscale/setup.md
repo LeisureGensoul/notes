@@ -30,7 +30,7 @@ systemctl enable --now tailscaled
 tailscale version
 ```
 
-配置基线为 Tailscale 1.104.4. 官方软件源安装其当前提供的版本, 使用命令输出确认实际版本.
+配置基线为 Tailscale 1.104.4, 安装版本由官方软件源提供.
 
 ## 2. 注册设备
 
@@ -40,7 +40,7 @@ tailscale ip -4
 tailscale status
 ```
 
-打开命令返回的链接完成登录, 将服务器加入自己的 Tailnet. 在管理端设置设备名称并确认 MagicDNS 开启.
+打开命令返回的链接完成登录, 将服务器加入自己的 Tailnet. 在管理端设置设备名称并开启 MagicDNS.
 
 ## 3. 配置出口转发
 
@@ -55,57 +55,34 @@ systemctl restart tailscaled
 
 ## 4. 启用出口和 SSH
 
-通过公网 OpenSSH 或服务商控制台执行:
-
 ```bash
 tailscale set --accept-dns=true --accept-routes=false --exit-node= \
   --advertise-exit-node --ssh=true
 ```
 
-开启 Tailscale SSH 会接管 Tailnet 地址的 TCP 22. 经该地址建立的现有 SSH 会话可能断开. 公网 OpenSSH 保持原状.
+Tailscale SSH 接管 Tailnet 地址的 TCP 22. 公网地址使用 OpenSSH.
 
 在 Tailscale 管理端完成:
 
 1. 批准服务器发布的 IPv4 和 IPv6 出口路由.
-2. 允许授权设备访问服务器 TCP 22, 并允许所需的 exit node 上网访问.
-3. 在 SSH 策略中授权实际用户登录目标系统账号.
+2. 允许客户端访问服务器 TCP 22, 并通过 exit node 访问互联网.
+3. 在 SSH 策略中允许你的 Tailscale 用户登录服务器 root 账号.
 
 网络访问规则和 SSH 登录授权分别配置.
 
-## 5. 验收
+## 5. 客户端使用
 
-服务器执行:
+日常 SSH 使用 [HY2 连接](../hy2/setup.md#ssh-与文件传输).
 
-```bash
-systemctl is-enabled tailscaled
-systemctl is-active tailscaled
-sysctl net.ipv4.ip_forward net.ipv6.conf.all.forwarding
-tailscale status
-tailscale debug prefs
-```
-
-预期 Tailscale 自启动启用, 服务为 active, 两项转发值为 1. SSH 开启, 出口路由已通告并在管理端批准.
-
-客户端登录 SSH, 将地址替换为服务器的 Tailscale IPv4. 策略须已授权 root 登录:
+使用原生 Tailscale SSH 时, 保持 Tailscale 连接并关闭 TUN. 将 `SERVER_TAILNET_IP` 替换为服务器的 Tailnet IPv4:
 
 ```bash
 ssh root@SERVER_TAILNET_IP
 ```
 
-预期进入服务器 root 会话, 执行 `exit` 返回客户端.
+使用 exit node 时, 在 Tailscale 中选择此服务器, 关闭 Clash 系统代理和 TUN. 国内外公网流量由服务器转发. 访问本地局域网时开启 `Allow LAN access`.
 
-在客户端执行:
-
-1. 关闭 Clash TUN.
-2. 在 Tailscale 中选择此服务器作为 exit node.
-3. 使用 curl 绕过应用代理, 查看公网出口地址:
-
-```bash
-curl --fail --show-error --noproxy '*' --connect-timeout 5 --max-time 10 \
-  --max-filesize 4096 --write-out '\nHTTP %{http_code}\n' https://api.ipify.org
-```
-
-预期返回服务器的公网出口地址和 `HTTP 200`, 命令退出码为 0. 完成后恢复日常的 TUN 和 exit node 设置.
+使用 [Clash 分流](../hy2/setup.md#客户端使用) 时关闭 exit node. 选择 `tailscale` 节点时保持 Tailscale 连接.
 
 ## 官方资料
 

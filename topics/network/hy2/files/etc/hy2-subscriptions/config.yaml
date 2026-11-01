@@ -1,5 +1,16 @@
 public_host: CHANGE_PUBLIC_IP
 tailnet_ip: CHANGE_TAILNET_IP
+tailnet_subscription_url: http://CHANGE_TAILNET_FQDN:18080/clash.yaml
+tailnet_interface: Tailscale
+hy2_devices:
+  CHANGE_TAILNET_NAME:
+    addresses:
+    - CHANGE_TAILNET_IP
+    - CHANGE_TAILNET_IPV6
+    names:
+    - CHANGE_TAILNET_NAME
+    - CHANGE_TAILNET_FQDN
+    direct_tcp_ports: [18080]
 port: 8443
 timezone: Asia/Singapore
 obfs_password: CHANGE_GECKO_PASSWORD

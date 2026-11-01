@@ -5,31 +5,37 @@
 Tailscale 通过设备身份和访问策略连接个人设备与服务器, 提供设备互联, SSH 和 exit node.
 
 - 设备互联: 使用 Tailscale 地址或 MagicDNS 名称.
-- 远程管理: Tailnet 内使用 Tailscale SSH, 公网 OpenSSH 保留私钥登录.
-- 互联网出口: 选择服务器作为 exit node, 由服务器转发流量.
+- 远程管理: 原生连接使用 Tailscale SSH, 经 HY2 的 SSH 使用 OpenSSH 私钥登录.
+- 互联网出口: exit node 使用 Tailscale 原生 WireGuard 通道转发公网流量.
 - 内网订阅: Tailscale Serve 提供全部 HY2 节点与分享信息.
 
 ```text
 设备 -> Tailscale -> SSH, 设备互联, exit node, 完整订阅
 ```
 
-设备注册, DNS, 网络访问策略, SSH 授权和出口路由批准属于 Tailnet 管理状态.
-
 ## HY2 代理与授权
 
 同一个 HY2 服务提供 Tailnet 和公网接入. `tailscale` 仅允许 Tailnet 来源, large 和 small 提供有期限和额度的公网代理.
 
 ```text
-应用 -> Mihomo -> Tailnet 或公网 HY2 -> 目标网站
+应用 -> Mihomo -> HY2 over Tailscale 或公网 UDP -> 新加坡 HY2 -> 目标服务
 ```
 
-内网订阅返回 1 个 tailscale, 4 个 large 和 16 个 small. large-token 返回自身和四个下级, small-token 仅返回自身. 每次订阅直接生成完整 YAML, DNS 和分流逻辑集中维护.
+内网配置内置 1 个 tailscale 和 4 个 large, 四个 provider 提供 16 个 small. 每个 provider 经对应 large 更新. 刷新和到期处理见 [订阅更新](hy2/setup.md#更新与分享).
+
+large-token 返回自身和四个下级, small-token 仅返回自身.
+
+Clash 按规则分流: 国内与局域网直连; 名单内的 Tailnet 设备, 其余互联网业务和国外 DNS 使用所选 HY2. 系统代理覆盖遵循代理设置的应用. TUN 接管路由内的 TCP/UDP 流量.
+
+选择 `tailscale` 节点时由 Tailscale 承载 HY2, 选择 large 或 small 时使用公网 UDP. 使用 Clash 分流时关闭 exit node; 单独使用 exit node 时关闭 Clash 系统代理和 TUN.
+
+设备分流集中在 `hy2_devices`, 当前只有 Singapore. 它的公网 IPv4, Tailnet 地址和名称均可用于 HY2 承载的 SSH, VS Code 和 SFTP. 其他 Tailnet 设备与完整内网订阅保持原生连接. 操作见 [HY2 部署](hy2/setup.md#客户端使用).
 
 - 认证: 订阅 token 与 HY2 密码分别签发. 服务器按授权身份检查期限, 来源和额度.
 - 生命周期: large 每周换代, small 每天换代, 无重叠期. 到期拒绝新认证并清理旧会话.
 - 分发: 内网通过 Tailscale Serve, 公网通过 HTTPS token 路径. 公网不提供完整内网配置.
 - 加密: 内外 HY2 正常校验可信 IP 证书, Certbot 自动续期.
-- 隔离: HY2 拒绝访问本机, Tailnet, 私网及元数据地址. 运行进程使用专用账号和 systemd 隔离.
+- 隔离: 对服务器自身, HY2 仅允许访问 OpenSSH 和公网 HTTPS 订阅. 其他私网及元数据地址拒绝访问. 服务使用专用账号和 systemd 隔离.
 
 ## 文件职责
 
@@ -39,11 +45,10 @@ Tailscale 通过设备身份和访问策略连接个人设备与服务器, 提�
 | [HY2 部署](hy2/setup.md) | 双入口, 分层订阅, 配额和客户端操作 |
 | [subscriptions.py](hy2/subscriptions.py) | 授权状态, 订阅范围, 认证, 换代与会话撤销 |
 | [build-config.py](hy2/build-config.py) | 共用客户端配置生成与快照导出 |
-| [test_subscriptions.py](hy2/test_subscriptions.py) | 授权隔离, 到期, 配额持久化和订阅边界测试 |
 | [Tailscale 启动参数](tailscale/files/etc/default/tailscaled) | 传输端口 |
 | [出口转发](tailscale/files/etc/sysctl.d/99-tailscale.conf) | IPv4 和 IPv6 转发 |
 | [HY2 配置](hy2/files/etc/hysteria/config.yaml) | 监听, TLS, 认证回调, Gecko, 统计与出站限制 |
-| [授权配置](hy2/files/etc/hy2-subscriptions/config.yaml) | 地址, 状态位置和额度 |
+| [授权配置](hy2/files/etc/hy2-subscriptions/config.yaml) | 地址, 设备分流, 状态位置和额度 |
 | [Caddy 配置](hy2/files/etc/caddy/Caddyfile) | HTTPS token 入口和证书验证路径 |
 | [HY2 服务](hy2/files/etc/systemd/system/hysteria.service) | 代理进程, 依赖与隔离 |
 | [授权服务](hy2/files/etc/systemd/system/hy2-subscriptions.service) | 本机订阅与认证进程 |

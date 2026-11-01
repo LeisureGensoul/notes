@@ -158,8 +158,12 @@ class Store:
             return [dict(g) for g in grants if self._available(db, g, now)
                     and (g['name'] == selected['name'] or g['parent'] == selected['name'])]
 
-    def render(self, token, now):
+    def render(self, token, now, *, nodes_only=False):
         grants = self.selected(token, now)
+        if nodes_only:
+            if token is None:
+                raise LookupError('Node data requires a public token')
+            grants = [g for g in grants if g['tier'] == 'small']
         host = self.config['public_host']
         nodes = []
         for g in grants:
@@ -168,11 +172,13 @@ class Store:
                     'port': int(self.config.get('port', 8443)), 'password': g['password'],
                     'obfs': 'gecko', 'obfs-password': self.config['obfs_password']}
             if g['tier'] == 'tailscale':
-                # 自动选口可能回退到 WLAN. 只给这个 Tailnet 节点绑定 Windows 的 Tailscale 接口.
-                node['interface-name'] = 'Tailscale'
                 node['sni'] = host
+                node['interface-name'] = self.config.get('tailnet_interface', 'Tailscale')
             nodes.append(node)
         comments, family = [], None
+        if token is None:
+            comments.extend(['# Tailnet subscription',
+                             '# ' + self.config['tailnet_subscription_url'], ''])
         for g in sorted((g for g in grants if g['token']),
                         key=lambda g: (g['parent'] or g['name'], g['name'])):
             group = g['parent'] or g['name']
@@ -186,7 +192,27 @@ class Store:
                 f"# {indent}  https://{host}/s/{g['token']}/clash.yaml",
                 '',
             ])
-        body = yaml.safe_dump(build_nodes(nodes, grants), sort_keys=False, allow_unicode=True)
+        if nodes_only:
+            config = {'proxies': nodes}
+        else:
+            providers = {}
+            for g in grants:
+                if g['tier'] == 'large':
+                    family = 'small-' + g['name'].rsplit('-', 1)[1]
+                    children = [node for node, grant in zip(nodes, grants) if grant['parent'] == g['name']]
+                    if children:
+                        providers[family] = {
+                            'type': 'http',
+                            'url': f"https://{host}/s/{g['token']}/nodes.yaml",
+                            'interval': 43200,
+                            'proxy': g['name'],
+                            'payload': children,
+                        }
+            if providers:
+                nodes = [node for node, grant in zip(nodes, grants) if grant['tier'] != 'small']
+            config = build_nodes(nodes, providers, self.config.get('hy2_devices'),
+                                 self.config.get('tailnet_interface', 'Tailscale'))
+        body = yaml.safe_dump(config, sort_keys=False, allow_unicode=True)
         body = re.sub(r'\n(?=[a-z][a-z-]*:\n)', '\n\n', body)
         return '\n'.join(comments) + '\n' + body
 
@@ -313,13 +339,15 @@ def handler_for(store):
             try:
                 if self.path == '/all.yaml':
                     token = None
+                    nodes_only = False
                 else:
-                    match = re.fullmatch(r'/s/([A-Za-z0-9_-]{43})/clash\.yaml', self.path)
+                    match = re.fullmatch(r'/s/([A-Za-z0-9_-]{43})/(clash|nodes)\.yaml', self.path)
                     if not match:
                         self.send(404)
                         return
                     token = match[1]
-                body = store.render(token, time.time()).encode()
+                    nodes_only = match[2] == 'nodes'
+                body = store.render(token, time.time(), nodes_only=nodes_only).encode()
                 self.send(200, body, 'application/yaml; charset=utf-8')
             except LookupError:
                 self.send(404)
