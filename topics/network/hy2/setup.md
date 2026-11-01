@@ -296,6 +296,8 @@ ss -ltnup
 - 国内网站命中 `DIRECT`, 其余流量按所选 HY2 节点处理.
 - 换代后旧订阅失效, 旧连接被清理, 累计额度不会被刷新或重启清零.
 
+验收 TUN 时, 保持 exit node 关闭. 在 Windows PowerShell 执行 `curl.exe --fail --noproxy "*" --connect-timeout 5 --max-time 10 https://example.com/`, 并在 Clash 连接记录中确认该请求由 TUN 接管且命中 `Overseas`.
+
 证书续期演练不替换生产证书:
 
 ```bash

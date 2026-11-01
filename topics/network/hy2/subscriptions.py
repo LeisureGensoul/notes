@@ -168,6 +168,7 @@ class Store:
                     'port': int(self.config.get('port', 8443)), 'password': g['password'],
                     'obfs': 'gecko', 'obfs-password': self.config['obfs_password']}
             if g['tier'] == 'tailscale':
+                # 自动选口可能回退到 WLAN. 只给这个 Tailnet 节点绑定 Windows 的 Tailscale 接口.
                 node['interface-name'] = 'Tailscale'
                 node['sni'] = host
             nodes.append(node)

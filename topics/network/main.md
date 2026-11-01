@@ -56,3 +56,5 @@ Tailscale 通过设备身份和访问策略连接个人设备与服务器, 提�
 | [证书发布脚本](hy2/files/usr/local/lib/hysteria/deploy-certificate.sh) | 原子替换证书文件并重新加载 HTTPS 入口 |
 
 各目录的 `files` 对应服务器绝对路径. 真实授权状态, 凭据和证书位于仓库外, 实际数据集中在 `/data/network`.
+
+传输实测对照见[传输说明](transport.md).

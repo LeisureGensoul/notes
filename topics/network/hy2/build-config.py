@@ -32,6 +32,7 @@ def build_nodes(nodes, grants):
             'auto-route': True,
             'auto-detect-interface': True,
             'dns-hijack': ['any:53'],
+            # 普通 Tailnet 访问绕过 TUN, 由系统路由处理. Tailnet 节点的出站接口在 subscriptions.py 中单独绑定.
             'route-exclude-address': ['100.64.0.0/10', 'fd7a:115c:a1e0::/48'],
         },
         'dns': {
