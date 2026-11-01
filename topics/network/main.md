@@ -8,7 +8,7 @@ flowchart TB
     peer["其他设备"] -->|"Tailscale exit node"| gateway["分流网关的 Clash TUN"]
     gateway --> rules
 
-    rules -->|"国内与局域网"| direct["Clash 所在设备直连"]
+    rules -->|"国内与局域网<br/>Tailscale 公网服务"| direct["Clash 所在设备直连"]
     rules -->|"其他 Tailnet 设备<br/>完整内网订阅"| native["Tailscale 原生连接"]
     rules -->|"其余公网业务与国外 DNS<br/>名单内设备业务"| selected["Overseas 所选 HY2"]
 
@@ -39,7 +39,7 @@ Tailscale 通过设备身份和访问策略连接个人设备与服务器, 提�
 
 large-token 返回自身和四个下级, small-token 仅返回自身.
 
-Clash 按规则分流: 国内与局域网直连; 名单内的 Tailnet 设备, 其余互联网业务和国外 DNS 使用所选 HY2. 系统代理覆盖遵循代理设置的应用. TUN 接管路由内的 TCP/UDP 流量.
+Clash 按规则分流: 国内, 局域网与 Tailscale 公网服务直连; 名单内的 Tailnet 设备, 其余互联网业务和国外 DNS 使用所选 HY2. 系统代理覆盖遵循代理设置的应用. TUN 接管路由内的 TCP/UDP 流量.
 
 选择 `tailscale` 节点时由 Tailscale 承载 HY2, 选择 large 或 small 时使用公网 UDP.
 

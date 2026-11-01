@@ -241,6 +241,7 @@ Clash 的两种接管方式共用规则模式, 本机不选择其他 exit node. 
 ### 分流与 DNS
 
 - 国内域名: 直连, 使用国内 DNS.
+- Tailscale 公网服务: `tailscale.com` 及其子域名直连, DNS 经 `223.5.5.5` 直连解析并返回真实 IP.
 - 其余域名: 通过 HY2 解析和访问.
 - 纯 IP 请求: 国内 IP 直连, 其余通过 HY2.
 - 局域网地址: 本地直连.
@@ -267,6 +268,8 @@ Clash 的两种接管方式共用规则模式, 本机不选择其他 exit node. 
 国内请求从网关的本地网络出网, 其余公网请求经所选 HY2. 系统代理不接管 Tailscale 的转发连接.
 
 TUN 以四条 `/1` 接管 IPv4 和 IPv6, 为真实网卡保留 `/0` 默认路由. Tailscale 的底层连接通过默认接口出站, `tailscaled.exe` 转发的业务进入现有分流.
+
+开机后, Tailscale 独立建连; 连通后即可使用 `tailscale` HY2 节点.
 
 ### Tailnet 设备分流
 
@@ -379,8 +382,10 @@ python3 -B /usr/local/lib/hysteria/build-config.py \
 - [可信 IP 证书与 Certbot](https://letsencrypt.org/2026/03/11/shorter-certs-certbot)
 - [Tailscale Serve](https://tailscale.com/docs/reference/tailscale-cli/serve)
 - [Tailscale 转发机制](https://tailscale.com/docs/reference/kernel-vs-userspace-routers)
+- [Tailscale 基础连接](https://tailscale.com/docs/reference/faq/firewall-ports)
 - [Tailscale Windows 出口选择](https://github.com/tailscale/tailscale/blob/v1.104.4/net/netmon/interfaces_windows.go)
 - [Mihomo TUN 路由](https://wiki.metacubex.one/config/inbound/tun/#route-address)
+- [Mihomo DNS](https://wiki.metacubex.one/config/dns/)
 - [Mihomo proxy-providers](https://wiki.metacubex.one/config/proxy-providers/)
 - [Mihomo 系统 DNS](https://wiki.metacubex.one/config/dns/type/#system)
 - [Clash 系统代理与 TUN](https://www.clashverge.dev/guide/term.html)

@@ -59,10 +59,11 @@ def build_nodes(nodes, providers=None, devices=None, tailnet_interface='Tailscal
             'ipv6': True,
             'enhanced-mode': 'fake-ip',
             'fake-ip-range': '198.18.0.1/16',
-            'fake-ip-filter': ['*.lan', '*.local', '*.ts.net'],
+            'fake-ip-filter': ['*.lan', '*.local', '*.ts.net', '+.tailscale.com'],
             'default-nameserver': ['223.5.5.5'],
             'nameserver': ['https://1.1.1.1/dns-query#Overseas'],
             'nameserver-policy': {
+                '+.tailscale.com': ['223.5.5.5#DIRECT'],
                 '+.lan': ['system'],
                 '+.local': ['system'],
                 '+.ts.net': ['100.100.100.100#tailnet-direct'],
@@ -94,6 +95,7 @@ def build_nodes(nodes, providers=None, devices=None, tailnet_interface='Tailscal
         'rules': [
             'PROCESS-NAME,tailscale.exe,DIRECT',
             'PROCESS-NAME,tailscaled,DIRECT',
+            'DOMAIN-SUFFIX,tailscale.com,DIRECT',
             *device_rules,
             'DOMAIN-SUFFIX,ts.net,tailnet-direct',
             'DOMAIN-SUFFIX,lan,DIRECT',
