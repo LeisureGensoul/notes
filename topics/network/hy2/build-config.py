@@ -23,7 +23,8 @@ def build_nodes(nodes, providers=None, devices=None, tailnet_interface='Tailscal
     if providers and not groups:
         overseas['use'] = list(providers)
     device_rules, hosts = [], {}
-    routes = ['0.0.0.0/0', '::/0']
+    # Preserve the physical default route for Tailscale's Windows transport.
+    routes = ['0.0.0.0/1', '128.0.0.0/1', '::/1', '8000::/1']
     for device in (devices or {}).values():
         addresses = [ipaddress.ip_address(value) for value in device['addresses']]
         matches = ['DOMAIN,' + name for name in device['names']]
@@ -91,7 +92,6 @@ def build_nodes(nodes, providers=None, devices=None, tailnet_interface='Tailscal
             },
         },
         'rules': [
-            'PROCESS-NAME,tailscaled.exe,DIRECT',
             'PROCESS-NAME,tailscale.exe,DIRECT',
             'PROCESS-NAME,tailscaled,DIRECT',
             *device_rules,

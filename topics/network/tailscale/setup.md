@@ -80,9 +80,9 @@ Tailscale SSH 接管 Tailnet 地址的 TCP 22. 公网地址使用 OpenSSH.
 ssh root@SERVER_TAILNET_IP
 ```
 
-使用 exit node 时, 在 Tailscale 中选择此服务器, 关闭 Clash 系统代理和 TUN. 国内外公网流量由服务器转发. 访问本地局域网时开启 `Allow LAN access`.
+直接使用服务器的 exit node 时, 在客户端选择此服务器并关闭 Clash 系统代理和 TUN. 国内外公网流量由服务器转发. 访问本地局域网时开启 `Allow LAN access`.
 
-使用 [Clash 分流](../hy2/setup.md#客户端使用) 时关闭 exit node. 选择 `tailscale` 节点时保持 Tailscale 连接.
+本机使用 [Clash 分流](../hy2/setup.md#客户端使用) 时, 不选择其他 exit node. 通过分流网关向其他设备提供分流, 见 [共享分流](../hy2/setup.md#通过-exit-node-共享分流).
 
 ## 官方资料
 

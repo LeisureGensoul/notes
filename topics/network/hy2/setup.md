@@ -224,11 +224,13 @@ Tailnet 访问策略允许客户端访问 TCP 18080 和 UDP 8443. 永久 `tailsc
 
 | 方式 | 接管范围 |
 | --- | --- |
-| Clash 系统代理 | 遵循系统代理设置的应用 |
+| Clash 系统代理 | 本机遵循系统代理设置的应用 |
 | Clash TUN | 路由内的 TCP/UDP 流量 |
-| Tailscale exit node | 默认公网流量, 使用 Tailscale 原生传输 |
+| Tailscale exit node | 将公网流量交给所选出口设备 |
 
-Clash 的两种接管方式共用规则模式, 使用时关闭 exit node. 选择 `tailscale` 节点须保持 Tailscale 连接, 公网节点无需连接 Tailscale. 单独使用 exit node 时关闭 Clash 系统代理和 TUN, 操作见 [Tailscale 使用](../tailscale/setup.md#5-客户端使用).
+Clash 的两种接管方式共用规则模式, 本机不选择其他 exit node. 选择 `tailscale` 节点须保持 Tailscale 连接, 公网节点无需连接 Tailscale.
+
+直接使用新加坡 exit node 时, 关闭客户端的 Clash 系统代理和 TUN. 操作见 [Tailscale 使用](../tailscale/setup.md#5-客户端使用).
 
 客户端保留订阅的 hosts, DNS 和 TUN 路由设置. Tailnet 出站接口见 [设备分流](#tailnet-设备分流), 公网 HY2 节点不绑定接口.
 
@@ -254,6 +256,18 @@ Clash 的两种接管方式共用规则模式, 使用时关闭 exit node. 选择
 
 公网 HY2 的承载出口由客户端内核选择.
 
+### 通过 exit node 共享分流
+
+使用 Windows 设备作为分流网关:
+
+1. 在网关启用本配置和 Clash TUN, 在 `Overseas` 选择可用节点.
+2. 在 Tailscale 开启 `Run exit node`, 在管理端批准该出口.
+3. 其他设备关闭本机的 Clash 系统代理和 TUN, 连接 Tailscale 并选择该网关作为 exit node.
+
+国内请求从网关的本地网络出网, 其余公网请求经所选 HY2. 系统代理不接管 Tailscale 的转发连接.
+
+TUN 以四条 `/1` 接管 IPv4 和 IPv6, 为真实网卡保留 `/0` 默认路由. Tailscale 的底层连接通过默认接口出站, `tailscaled.exe` 转发的业务进入现有分流.
+
 ### Tailnet 设备分流
 
 在 [授权配置](files/etc/hy2-subscriptions/config.yaml) 的 `hy2_devices` 中维护走 HY2 的设备. 当前只有 Singapore, 未列出的设备使用 Tailscale 原生连接.
@@ -270,7 +284,7 @@ Clash 的两种接管方式共用规则模式, 使用时关闭 exit node. 选择
 
 ### SSH 与文件传输
 
-在客户端选择有效的 HY2 节点, 开启 TUN 并关闭 exit node. 替换服务器的公网 IPv4, Tailnet IPv4 和客户端私钥路径:
+在客户端选择有效的 HY2 节点并开启 TUN. 替换服务器的公网 IPv4, Tailnet IPv4 和客户端私钥路径:
 
 ```bash
 ssh -o HostKeyAlias=SERVER_PUBLIC_IP -i /path/to/private-key root@SERVER_TAILNET_IP
@@ -364,6 +378,9 @@ python3 -B /usr/local/lib/hysteria/build-config.py \
 - [Hysteria2 ACL](https://v2.hysteria.network/docs/advanced/ACL/)
 - [可信 IP 证书与 Certbot](https://letsencrypt.org/2026/03/11/shorter-certs-certbot)
 - [Tailscale Serve](https://tailscale.com/docs/reference/tailscale-cli/serve)
+- [Tailscale 转发机制](https://tailscale.com/docs/reference/kernel-vs-userspace-routers)
+- [Tailscale Windows 出口选择](https://github.com/tailscale/tailscale/blob/v1.104.4/net/netmon/interfaces_windows.go)
+- [Mihomo TUN 路由](https://wiki.metacubex.one/config/inbound/tun/#route-address)
 - [Mihomo proxy-providers](https://wiki.metacubex.one/config/proxy-providers/)
 - [Mihomo 系统 DNS](https://wiki.metacubex.one/config/dns/type/#system)
 - [Clash 系统代理与 TUN](https://www.clashverge.dev/guide/term.html)

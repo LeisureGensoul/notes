@@ -1,25 +1,39 @@
 # 网络设置
 
+## 策略总览
+
+```mermaid
+flowchart TB
+    app["本机应用"] -->|"系统代理 / TUN"| rules["Clash 规则分流"]
+    peer["其他设备"] -->|"Tailscale exit node"| gateway["分流网关的 Clash TUN"]
+    gateway --> rules
+
+    rules -->|"国内与局域网"| direct["Clash 所在设备直连"]
+    rules -->|"其他 Tailnet 设备<br/>完整内网订阅"| native["Tailscale 原生连接"]
+    rules -->|"其余公网业务与国外 DNS<br/>名单内设备业务"| selected["Overseas 所选 HY2"]
+
+    selected -->|"tailscale 节点"| wrapped["HY2 over Tailscale"]
+    selected -->|"large / small 节点"| public["HY2 over 公网 UDP"]
+    wrapped --> server["Singapore HY2"]
+    public --> server
+    server --> target["互联网服务 / Singapore OpenSSH"]
+
+    app -->|"Tailscale exit node"| exit["Singapore 原生出口"]
+    exit -->|"国内外公网"| internet["互联网"]
+```
+
 ## Tailscale 基础网络
 
 Tailscale 通过设备身份和访问策略连接个人设备与服务器, 提供设备互联, SSH 和 exit node.
 
 - 设备互联: 使用 Tailscale 地址或 MagicDNS 名称.
 - 远程管理: 原生连接使用 Tailscale SSH, 经 HY2 的 SSH 使用 OpenSSH 私钥登录.
-- 互联网出口: exit node 使用 Tailscale 原生 WireGuard 通道转发公网流量.
+- 互联网出口: exit node 使用 Tailscale 原生 WireGuard 通道把公网流量送到出口设备.
 - 内网订阅: Tailscale Serve 提供全部 HY2 节点与分享信息.
-
-```text
-设备 -> Tailscale -> SSH, 设备互联, exit node, 完整订阅
-```
 
 ## HY2 代理与授权
 
 同一个 HY2 服务提供 Tailnet 和公网接入. `tailscale` 仅允许 Tailnet 来源, large 和 small 提供有期限和额度的公网代理.
-
-```text
-应用 -> Mihomo -> HY2 over Tailscale 或公网 UDP -> 新加坡 HY2 -> 目标服务
-```
 
 内网配置内置 1 个 tailscale 和 4 个 large, 四个 provider 提供 16 个 small. 每个 provider 经对应 large 更新. 刷新和到期处理见 [订阅更新](hy2/setup.md#更新与分享).
 
@@ -27,7 +41,9 @@ large-token 返回自身和四个下级, small-token 仅返回自身.
 
 Clash 按规则分流: 国内与局域网直连; 名单内的 Tailnet 设备, 其余互联网业务和国外 DNS 使用所选 HY2. 系统代理覆盖遵循代理设置的应用. TUN 接管路由内的 TCP/UDP 流量.
 
-选择 `tailscale` 节点时由 Tailscale 承载 HY2, 选择 large 或 small 时使用公网 UDP. 使用 Clash 分流时关闭 exit node; 单独使用 exit node 时关闭 Clash 系统代理和 TUN.
+选择 `tailscale` 节点时由 Tailscale 承载 HY2, 选择 large 或 small 时使用公网 UDP.
+
+分流网关作为 exit node 接收其他设备的流量, 交由 Clash TUN 分流. 操作见 [共享分流](hy2/setup.md#通过-exit-node-共享分流).
 
 设备分流集中在 `hy2_devices`, 当前只有 Singapore. 它的公网 IPv4, Tailnet 地址和名称均可用于 HY2 承载的 SSH, VS Code 和 SFTP. 其他 Tailnet 设备与完整内网订阅保持原生连接. 操作见 [HY2 部署](hy2/setup.md#客户端使用).
 
