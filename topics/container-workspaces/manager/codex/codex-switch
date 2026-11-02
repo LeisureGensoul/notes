@@ -1,0 +1,205 @@
+#!/usr/bin/env python3
+"""Manage the selected workspace account and hand off its daemon."""
+import argparse
+from contextlib import contextmanager
+import fcntl
+import json
+import os
+import re
+import signal
+import subprocess
+from pathlib import Path
+BASE=Path('/codex-home')
+ROOT=Path('/codex-accounts')
+
+def account_names():
+    return sorted(p.stem for p in ROOT.glob("*.json") if p.is_file())
+
+
+def selected():
+    accounts = account_names()
+    if not accounts:
+        raise SystemExit('No accounts authorized for this user.')
+    current = BASE / 'auth.json'
+    if current.is_symlink():
+        for key in accounts:
+            if current.readlink() == BASE/'profiles'/key/'auth.json':
+                return key
+    return accounts[0]
+
+
+@contextmanager
+def account_lock():
+    with (BASE/'account-switch.lock').open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        yield
+
+
+def profile(key):
+    folder = BASE/'profiles'/key
+    folder.mkdir(parents=True, exist_ok=True, mode=0o700)
+    history = BASE/'history'
+    history.mkdir(exist_ok=True, mode=0o700)
+    directories = ('sessions', 'archived_sessions', 'thread-writer-locks')
+    for name in directories:
+        (history/name).mkdir(exist_ok=True)
+    log = history/'history.jsonl'
+    if not log.exists():
+        log.touch()
+
+    # The session index is a per-profile cache. SQLite files and journals are shared.
+    databases = ('state_5.sqlite', 'thread_history_1.sqlite')
+    files = [db + suffix for db in databases for suffix in ('', '-wal', '-shm')]
+    for name in (*directories, log.name, *files):
+        link, target = folder/name, history/name
+        if link.is_symlink() and link.resolve() == target.resolve():
+            continue
+        link.symlink_to(target)
+    for name in ('config.toml', 'plugins', 'skills', 'rules'):
+        source, link = BASE/name, folder/name
+        if source.exists() and not link.exists() and not link.is_symlink():
+            link.symlink_to(source)
+    return folder
+
+
+def set_link(path, target):
+    if path.is_symlink() and path.readlink() == target:
+        return
+    if path.exists() and not path.is_symlink():
+        raise SystemExit(f'Existing credential file requires administrator review: {path}')
+    temporary = path.with_name(f'.{path.name}.link-{os.getpid()}')
+    try:
+        temporary.symlink_to(target)
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def prepare_profile(key):
+    credential = ROOT/(key + '.json')
+    if key not in account_names():
+        raise SystemExit('Account is not authorized for this user.')
+    folder = profile(key)
+    set_link(folder/'auth.json', credential)
+    package = folder/'packages/app-server-daemon'
+    package.mkdir(parents=True, exist_ok=True)
+    set_link(package/'current', Path('/opt/codex/current'))
+    settings = folder/'app-server-daemon/settings.json'
+    data = json.loads(settings.read_text()) if settings.exists() else {}
+    updater = data.setdefault('updater', {})
+    if updater.get('autoUpdateEnabled') is not False:
+        updater['autoUpdateEnabled'] = False
+        settings.parent.mkdir(exist_ok=True)
+        temporary = settings.with_suffix('.tmp')
+        temporary.write_text(json.dumps(data))
+        temporary.replace(settings)
+    return folder
+
+
+def active_profile():
+    with account_lock():
+        folder = prepare_profile(selected())
+        set_link(BASE/'auth.json', folder/'auth.json')
+        return folder
+
+
+def account_environment(home):
+    return dict(os.environ, CODEX_HOME=str(home),
+                CODEX_REFRESH_TOKEN_URL_OVERRIDE='http://127.0.0.1:9/admin-managed-auth',
+                CODEX_REVOKE_TOKEN_URL_OVERRIDE='http://127.0.0.1:9/admin-managed-auth')
+
+
+def daemon(home, action):
+    result = subprocess.run(
+        ['/opt/codex/current/bin/codex', 'app-server', 'daemon', action],
+        env=account_environment(home), check=True, timeout=120, text=True,
+        stdout=subprocess.PIPE if action == 'version' else None,
+    )
+    if action == 'version':
+        return json.loads(result.stdout)
+
+
+def refresh():
+    with account_lock():
+        if not account_names():
+            return
+        home = BASE/'profiles'/selected()
+        if not (home/'app-server-control/app-server-control.sock').exists():
+            return
+        state = daemon(home, 'version')
+        if state.get('status') != 'running' or state['appServerVersion'] == state['cliVersion']:
+            return
+        daemon(home, 'restart')
+        state = daemon(home, 'version')
+        if state.get('status') != 'running' or state['appServerVersion'] != state['cliVersion']:
+            raise SystemExit('Daemon did not switch to the published version')
+        print(f"{home.name}: daemon {state['appServerVersion']}")
+
+
+def stop_profile_processes(home):
+    marker = os.fsencode(f'CODEX_HOME={home}')
+    for proc in Path('/proc').iterdir():
+        if not proc.name.isdigit():
+            continue
+        try:
+            if marker in (proc/'environ').read_bytes().split(b'\0'):
+                os.kill(int(proc.name), signal.SIGKILL)
+        except (FileNotFoundError, ProcessLookupError):
+            pass
+        except PermissionError:
+            # SSH also runs unprivileged helpers. Codex profiles run as root.
+            if proc.stat().st_uid == os.geteuid():
+                raise
+
+
+def revoke(key):
+    if not re.fullmatch(r'[a-z][a-z0-9_-]{0,31}', key):
+        raise SystemExit('Invalid account alias.')
+    with account_lock():
+        if key in account_names():
+            raise SystemExit('Remove the account grant first.')
+        home = BASE/'profiles'/key
+        current = BASE/'auth.json'
+        if current.is_symlink() and current.readlink() == home/'auth.json':
+            current.unlink()
+        try:
+            if (home/'app-server-control/app-server-control.sock').exists():
+                daemon(home, 'stop')
+        finally:
+            stop_profile_processes(home)
+
+
+def handoff(key):
+    with account_lock():
+        target = prepare_profile(key)
+        previous = BASE/'profiles'/selected()
+        if previous != target and (previous/'app-server-control/app-server-control.sock').exists():
+            daemon(previous, 'stop')
+        daemon(target, 'start')
+        set_link(BASE/'auth.json', target/'auth.json')
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument('account', nargs='?', choices=account_names())
+    group.add_argument('--revoke', metavar='ACCOUNT', help=argparse.SUPPRESS)
+    group.add_argument('--refresh', action='store_true', help='Restart a running daemon if its version changed')
+    args = parser.parse_args()
+    if args.revoke:
+        revoke(args.revoke)
+        return
+    if args.refresh:
+        refresh()
+        return
+    key = args.account
+    if key is None:
+        for account in account_names():
+            print(('* ' if selected() == account else '  ') + account)
+    else:
+        handoff(key)
+        print('Selected ' + key)
+
+
+if __name__ == '__main__':
+    main()

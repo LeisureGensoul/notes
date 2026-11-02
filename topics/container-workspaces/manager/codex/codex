@@ -1,0 +1,56 @@
+#!/usr/bin/env python3
+"""Launch the pinned Codex runtime with the active workspace profile."""
+import os
+import runpy
+from pathlib import Path
+import sys
+import shutil
+import re
+import tempfile
+
+VALUE_FLAGS={'-c','--config','-m','--model','-p','--profile','-s','--sandbox','-a','--ask-for-approval','-C','--cd','--add-dir','--enable','--disable','-i','--image'}
+
+def command(args):
+    i=0
+    while i<len(args):
+        arg=args[i]
+        if arg=='--':return None,[]
+        if arg in VALUE_FLAGS:i+=2;continue
+        if arg.startswith('-'):i+=1;continue
+        return arg,args[i+1:]
+    return None,[]
+
+def main():
+    runtime=Path('/opt/codex')
+    if not (runtime/'current/bin/codex').is_file():
+        raise SystemExit('Ask the administrator to install the Codex runtime.')
+    release=(runtime/'current').resolve(strict=True)
+    if release.parent!=runtime/'releases':raise SystemExit('Invalid Codex runtime link')
+    node=shutil.which('node')
+    if not node:
+        nodes=sorted(Path(os.environ.get('HOME','/root')).glob('.vscode-server/bin/*/node'),key=lambda p:p.stat().st_mtime,reverse=True)
+        node=next((str(p) for p in nodes if os.access(p,os.X_OK)),None)
+    if node:os.environ['CODEX_MCP_NODE_PATH']=node
+    verb,rest=command(sys.argv[1:])
+    if verb in ('login', 'logout') and (verb, rest) != ('login', ['status']):
+        raise SystemExit('Use the administrator login command.')
+    accounts = runpy.run_path('/usr/local/bin/codex-switch')
+    folder = accounts['active_profile']()
+    env = accounts['account_environment'](folder)
+    # Keep this setting in config: arbitrary -c flags disable native daemon use.
+    config=(folder/'config.toml').resolve()
+    text=config.read_text() if config.exists() else ''
+    top, sep, tail=text.partition('[')
+    pattern=r'(?m)^cli_auth_credentials_store\s*=.*$'
+    if re.search(pattern,top):top=re.sub(pattern,'cli_auth_credentials_store = "file"',top)
+    else:top='cli_auth_credentials_store = "file"\n'+top
+    updated=top+sep+tail
+    if updated!=text:
+        config.parent.mkdir(parents=True,exist_ok=True)
+        fd,tmp=tempfile.mkstemp(prefix='.config-',dir=config.parent)
+        with os.fdopen(fd,'w') as f:f.write(updated)
+        os.replace(tmp,config)
+    binary = str(release/'bin/codex')
+    os.execve(binary, [binary, *sys.argv[1:]], env)
+
+if __name__=='__main__':main()

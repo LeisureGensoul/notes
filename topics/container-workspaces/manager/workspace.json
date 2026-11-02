@@ -1,0 +1,10 @@
+{
+  "disk_root": "/mnt/aosp",
+  "user": "example",
+  "versions": {},
+  "image": "builder:local",
+  "ssh_port": null,
+  "adb_server": "host.docker.internal:5037",
+  "cpus": 16,
+  "memory_gib": 32
+}
