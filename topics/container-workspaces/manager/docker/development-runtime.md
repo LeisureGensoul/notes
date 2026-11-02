@@ -8,7 +8,7 @@
 docker build --platform linux/amd64 -t builder:local docker/
 ```
 
-镜像基于 Ubuntu 24.04，包含 AOSP 构建工具和 ADB 客户端。可用 `--build-arg UBUNTU_MIRROR=<地址>` 更换软件源。[AOSP 构建环境要求](https://source.android.com/docs/setup/start/requirements)
+镜像基于 Ubuntu 24.04，包含 AOSP 构建工具和 ADB 客户端。Codex 沙箱使用系统的 `bubblewrap`，`data` 插件使用 Node.js 24。可用 `--build-arg UBUNTU_MIRROR=<地址>` 更换软件源。[AOSP 构建环境要求](https://source.android.com/docs/setup/start/requirements)
 
 管理器自动加载工作区的 seccomp 策略。已有容器运行 `sudo python3 workspace.py rebuild` 应用变更。[工作区策略](workspace-seccomp.json) · [上游默认策略](https://github.com/moby/profiles/blob/seccomp/v0.2.4/seccomp/default.json)
 

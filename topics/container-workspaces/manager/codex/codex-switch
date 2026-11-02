@@ -112,10 +112,14 @@ def account_environment(home):
 def daemon(home, action):
     result = subprocess.run(
         ['/opt/codex/current/bin/codex', 'app-server', 'daemon', action],
-        env=account_environment(home), check=True, timeout=120, text=True,
-        stdout=subprocess.PIPE if action == 'version' else None,
+        env=account_environment(home), timeout=120, text=True, capture_output=True,
     )
-    if action == 'version':
+    if result.returncode:
+        # An interactive CLI can own the server at this profile's control socket.
+        if action == 'stop' and 'app server is running but is not managed by codex app-server daemon' in result.stderr:
+            return
+        raise SystemExit(result.stderr.strip() or result.stdout.strip() or f'Codex daemon {action} failed for {home.name}')
+    if action in ('start', 'version'):
         return json.loads(result.stdout)
 
 
@@ -173,10 +177,19 @@ def handoff(key):
     with account_lock():
         target = prepare_profile(key)
         previous = BASE/'profiles'/selected()
-        if previous != target and (previous/'app-server-control/app-server-control.sock').exists():
-            daemon(previous, 'stop')
-        daemon(target, 'start')
-        set_link(BASE/'auth.json', target/'auth.json')
+        started = daemon(target, 'start')
+        current = BASE/'auth.json'
+        try:
+            set_link(current, target/'auth.json')
+            if previous != target and (previous/'app-server-control/app-server-control.sock').exists():
+                daemon(previous, 'stop')
+        except (SystemExit, OSError, subprocess.SubprocessError):
+            if previous != target:
+                if current.is_symlink() and current.readlink() == target/'auth.json':
+                    set_link(current, previous/'auth.json')
+                if started.get('status') == 'started':
+                    daemon(target, 'stop')
+            raise
 
 
 def main():

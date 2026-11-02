@@ -4,7 +4,6 @@ import os
 import runpy
 from pathlib import Path
 import sys
-import shutil
 import re
 import tempfile
 
@@ -26,11 +25,6 @@ def main():
         raise SystemExit('Ask the administrator to install the Codex runtime.')
     release=(runtime/'current').resolve(strict=True)
     if release.parent!=runtime/'releases':raise SystemExit('Invalid Codex runtime link')
-    node=shutil.which('node')
-    if not node:
-        nodes=sorted(Path(os.environ.get('HOME','/root')).glob('.vscode-server/bin/*/node'),key=lambda p:p.stat().st_mtime,reverse=True)
-        node=next((str(p) for p in nodes if os.access(p,os.X_OK)),None)
-    if node:os.environ['CODEX_MCP_NODE_PATH']=node
     verb,rest=command(sys.argv[1:])
     if verb in ('login', 'logout') and (verb, rest) != ('login', ['status']):
         raise SystemExit('Use the administrator login command.')
