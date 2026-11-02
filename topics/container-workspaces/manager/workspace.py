@@ -55,7 +55,10 @@ def config(path):
     memory_gib = data.get("memory_gib", 32)
     if memory_gib is not None and (type(memory_gib) is not int or memory_gib < 1):
         raise ValueError("memory_gib must be a positive integer or null")
-    return root, user, dict(sorted(versions.items())), sorted(accounts), image, ssh_port, adb_server, cpus, memory_gib
+    swap_gib = data.get("swap_gib")
+    if swap_gib is not None and (type(swap_gib) is not int or swap_gib < 0 or memory_gib is None):
+        raise ValueError("swap_gib requires memory_gib and must be a nonnegative integer")
+    return root, user, dict(sorted(versions.items())), sorted(accounts), image, ssh_port, adb_server, cpus, memory_gib, swap_gib
 
 
 def client_key(name):
@@ -78,7 +81,34 @@ def check_login_keys(path):
         raise ValueError(f"Expected one Ed25519 public key per line in {path}")
 
 
-def generate_client_key(name):
+def write_ssh_config(name, key, port):
+    path = key.with_name("ssh_config")
+    if path.resolve() != path or (path.exists() and not path.is_file()):
+        raise ValueError(f"Expected a regular SSH config at {path}")
+    if not path.exists():
+        identity = key.as_posix()
+        drive = re.fullmatch(r"/(?:mnt/|mnt/host/|run/desktop/mnt/host/)([a-z])/(.+)", identity)
+        if drive:
+            identity = f"{drive[1].upper()}:/{drive[2]}"
+        identity = identity.replace("%", "%%").replace('"', r'\"')
+        with tempfile.TemporaryDirectory(dir=key.parent) as temp:
+            draft = Path(temp) / "ssh_config"
+            draft.write_text(f"Host {name}\n    HostName 127.0.0.1\n    Port {port}\n"
+                             f"    User root\n    HostKeyAlias {name}\n"
+                             f'    IdentityFile "{identity}"\n    IdentitiesOnly yes\n', encoding="utf-8")
+            if os.name == "nt":
+                run("icacls", draft, "/inheritance:r", "/grant:r", f"{output('whoami')}:F",
+                    "*S-1-5-18:F", "*S-1-5-32-544:F")
+            else:
+                draft.chmod(0o600)
+            try:
+                os.link(draft, path)
+            except FileExistsError:
+                pass
+    print(f"SSH config: {path}")
+
+
+def generate_client_key(name, ssh_port):
     key = client_key(name)
     public = key.with_suffix(".pub")
     directory = key.parent.parent
@@ -90,20 +120,27 @@ def generate_client_key(name):
             "*S-1-5-18:(OI)(CI)F", "*S-1-5-32-544:(OI)(CI)F")
     else:
         directory.chmod(0o700)
-    if not key.parent.exists():
+    key.parent.mkdir(mode=0o700, exist_ok=True)
+    if not key.exists() and not public.exists():
         with tempfile.TemporaryDirectory(dir=directory) as temp:
-            stage = Path(temp) / name
-            stage.mkdir(mode=0o700)
-            run("ssh-keygen", "-q", "-t", "ed25519", "-C", name, "-f", stage / key.name)
+            staged_key = Path(temp) / key.name
+            run("ssh-keygen", "-q", "-t", "ed25519", "-C", name, "-f", staged_key)
             try:
-                stage.rename(key.parent)
-            except OSError:
-                if not key.is_file() or not public.is_file():
+                os.link(staged_key, key)
+            except FileExistsError:
+                pass
+            else:
+                try:
+                    os.link(staged_key.with_suffix(".pub"), public)
+                except OSError:
+                    key.unlink()
                     raise
     if not key.is_file() or not public.is_file():
         raise ValueError(f"Incomplete key pair in {key.parent}")
     print(f"IdentityFile {key.as_posix()}")
     print(f"Public key: {public}")
+    if ssh_port is not None:
+        write_ssh_config(name, key, ssh_port)
 
 
 def output(*args):
@@ -231,7 +268,7 @@ def main():
     parser.add_argument("--account")
     parser.add_argument("--confirm")
     args = parser.parse_args()
-    root, user, versions, accounts, image, ssh_port, adb_server, cpus, memory_gib = config(args.config)
+    root, user, versions, accounts, image, ssh_port, adb_server, cpus, memory_gib, swap_gib = config(args.config)
     action = args.action
     if action == "delete":
         if args.subject not in CATALOG:
@@ -243,7 +280,7 @@ def main():
         parser.error("Unexpected argument for " + action)
     name = user
     if action == "keygen":
-        generate_client_key(name)
+        generate_client_key(name, ssh_port)
         return
     if os.name != "posix":
         parser.error("Run workspace management commands on the Linux host")
@@ -352,6 +389,8 @@ def main():
         limits.extend(["--cpus", str(cpus)])
     if memory_gib is not None:
         limits.extend(["--memory", f"{memory_gib}g"])
+    if swap_gib is not None:
+        limits.extend(["--memory-swap", f"{memory_gib + swap_gib}g"])
     settings.extend(limits)
     config_label = json.dumps(settings)
     if item and action != "rebuild" and item["Config"]["Labels"].get("local-manager.config") != config_label:

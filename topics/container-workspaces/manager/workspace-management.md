@@ -6,7 +6,7 @@
 
 主机需要 Python 3、Docker 和已挂载的 SSD。
 
-- **WSL 2**　在管理员 PowerShell 中运行[接盘脚本](windows/Mount-AospDisk.ps1)。将 `disk_root` 设为 `/mnt/wsl/AOSP`。
+- **WSL 2**　在管理员 PowerShell 中运行[接盘脚本](windows/Mount-AospDisk.ps1)。WSL 发行版通常使用 `/mnt/wsl/AOSP`。通过 Docker Desktop 的 Linux 主机运行管理器时，使用 `/run/desktop/mnt/host/wsl/AOSP`。
 - **Ubuntu**　默认挂载到 `/mnt/aosp`。
 
 ```sh
@@ -14,12 +14,16 @@ sudo mkdir -p /mnt/aosp
 sudo mount -U 9fa88778-a01d-458f-932b-f59d3673e77d /mnt/aosp
 ```
 
+本机 WSL 的交换文件是 SSD 上的 `/mnt/wsl/AOSP/swapfile`（48 GiB）。接盘脚本会启用它。卸盘前先停止工作区，再运行 `wsl --system --user root --exec /usr/sbin/swapoff /mnt/wsl/AOSP/swapfile`。
+
 在 `manager/` 下[构建镜像](docker/development-runtime.md)。管理器默认读取 [workspace.json](workspace.json)，其中 `user` 指定要管理的工作区。用以下命令创建并进入该工作区。
 
 ```sh
 sudo python3 workspace.py create
 sudo python3 workspace.py enter
 ```
+
+个人配置可放在 `local_keys/<用户>/workspace.json`，与 SSH 密钥一起由 Git 忽略。管理这类工作区时指定配置，例如 `sudo python3 workspace.py sync --config local_keys/gensoul/workspace.json`。
 
 ## 挂载和卸载版本
 
@@ -67,22 +71,28 @@ lunch "$AOSP_BUILD_TARGET"
 
 ## SSH 登录
 
-**提供者**在 `workspace.json` 中设置 `ssh_port`。每个用户选择不同的主机端口。运行 `python3 workspace.py keygen` 生成密钥，保存在 `local_keys/<用户>/`。新容器用 `create`，已有容器用 `rebuild`。
+### 新用户生成密钥和别名
 
-**使用者**向提供者取得地址、端口和私钥。在本机的 `~/.ssh/config` 保存别名。`IdentityFile` 填本机私钥路径。示例中，主机的 `2222` 端口连接到容器的 `22` 端口。
+以 `lin` 为例，以下命令都在 `manager/` 下执行。
+
+1. 将工作区配置复制到 `local_keys/lin/workspace.json`。设置 `"user": "lin"`，为 `ssh_port` 选一个未占用的主机端口。
+2. 在 Windows 运行 `python workspace.py keygen --config local_keys/lin/workspace.json`。密钥和别名文件 `ssh_config` 会生成在同一目录。别名就是 `lin`。
+3. 在 Linux 主机运行 `sudo python3 workspace.py create --config local_keys/lin/workspace.json`。若容器已存在，用 `rebuild` 应用端口设置。
+
+本机 Windows 已在 `~/.ssh/config` 开头配置以下规则，新用户的别名会自动生效。
 
 ```sshconfig
-Host shuo
-    HostName <主机地址>
-    Port 2222
-    User root
-    IdentityFile ~/.ssh/shuo
-    IdentitiesOnly yes
+Include "C:/WorkArea/notes/topics/container-workspaces/manager/local_keys/*/ssh_config"
 ```
 
-终端运行 `ssh shuo`。VS Code 使用 **Remote-SSH: Connect to Host…** 选择同一别名，再打开 `/workspace/` 或某个版本目录。
+### 已有用户直接连接
 
-多人共用私钥时，访问权限只能一起撤销。若要单独授权，将 `id_ed25519.pub` 复制为同目录的 `authorized_keys`。每行放一把公钥，增删后运行 `rebuild`。
+- **终端**　运行 `ssh gensoul`。
+- **VS Code**　执行 **Remote-SSH: Connect to Host…**，选择 `gensoul`，打开 `/workspace/`。
+
+别名默认连接本机。地址、端口或私钥位置有变化时，编辑个人 `ssh_config`。重复运行 `keygen` 会保留已有密钥和别名。
+
+**多人授权（可选）**　共用私钥只能一起撤销访问。要单独授权，首次将 `id_ed25519.pub` 复制为同目录的 `authorized_keys`。每行放一把公钥，增删后运行 `rebuild`。
 
 ## ADB 连接手机
 
@@ -118,6 +128,8 @@ adb -s <序列号> shell
 ## 容器配置与维护
 
 `cpus` 默认上限为 16 个逻辑 CPU，支持小数。`memory_gib` 默认上限为 32 GiB。省略字段使用默认值，设为 `null` 取消该项限制。
+
+`swap_gib` 是额外的交换空间上限，需同时设置 `memory_gib`。设为 `0` 可禁用容器交换空间，省略时沿用 Docker 默认值。
 
 | 主机操作 | `sudo python3 workspace.py` 子命令 |
 | --- | --- |
