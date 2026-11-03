@@ -63,6 +63,7 @@ Clash 按规则分流: 国内, 局域网与 Tailscale 公网服务直连; 名单
 | [build-config.py](hy2/build-config.py) | 共用客户端配置生成与快照导出 |
 | [Tailscale 启动参数](tailscale/files/etc/default/tailscaled) | 传输端口 |
 | [出口转发](tailscale/files/etc/sysctl.d/99-tailscale.conf) | IPv4 和 IPv6 转发 |
+| [UDP 缓冲区](hy2/files/etc/sysctl.d/99-hy2-udp-buffers.conf) | UDP 收发缓冲区上限 |
 | [HY2 配置](hy2/files/etc/hysteria/config.yaml) | 监听, TLS, 认证回调, Gecko, 统计与出站限制 |
 | [授权配置](hy2/files/etc/hy2-subscriptions/config.yaml) | 地址, 设备分流, 状态位置和额度 |
 | [Caddy 配置](hy2/files/etc/caddy/Caddyfile) | HTTPS token 入口和证书验证路径 |
