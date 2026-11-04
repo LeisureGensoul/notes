@@ -123,7 +123,7 @@ adb -s <序列号> shell
 | 登录或更新凭证 | `login --account <账号>` |
 | 授权 / 撤销 | `grant --account <账号>` / `revoke --account <账号>` |
 
-容器内用 `codex-switch` 查看账号，`codex-switch <账号>` 切换账号。切换后，新启动的 `codex` 使用所选账号。已有 CLI 会话可退出后用 `codex resume` 继续。
+容器内用 `codex-switch` 查看账号，用 `codex-switch <账号>` 切换。切换成功后只保留所选账号的后台。旧会话断开后，用 `codex resume` 继续。
 
 撤销会结束该用户以此账号运行的 Codex 进程。账号配置和对话保存在 SSD 的 `workspaces/<用户>/codex/`。
 

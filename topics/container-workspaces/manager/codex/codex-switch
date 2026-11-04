@@ -6,7 +6,10 @@ import fcntl
 import json
 import os
 import re
+import select
 import signal
+import socket
+import struct
 import subprocess
 from pathlib import Path
 BASE=Path('/codex-home')
@@ -109,6 +112,44 @@ def account_environment(home):
                 CODEX_REVOKE_TOKEN_URL_OVERRIDE='http://127.0.0.1:9/admin-managed-auth')
 
 
+def server_pid(home):
+    with socket.socket(socket.AF_UNIX) as peer:
+        peer.settimeout(3)
+        try:
+            peer.connect(str(home/'app-server-control/app-server-control.sock'))
+        except (FileNotFoundError, ConnectionRefusedError):
+            return None
+        return struct.unpack('3i', peer.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))[0]
+
+
+def stop_cli_server(home):
+    pid = server_pid(home)
+    if pid is None:
+        return
+    try:
+        fd = os.pidfd_open(pid)
+    except ProcessLookupError:
+        return
+    try:
+        proc = Path('/proc')/str(pid)
+        peer = server_pid(home)
+        if peer is None:
+            return  # The old server closed its socket before we could stop it.
+        if (peer != pid or (proc/'exe').readlink().name.removesuffix(' (deleted)') != 'codex'
+                or b'app-server' not in (proc/'cmdline').read_bytes().split(b'\0')
+                or os.fsencode(f'CODEX_HOME={home}') not in (proc/'environ').read_bytes().split(b'\0')):
+            raise SystemExit(f'Cannot identify the Codex server for {home.name}')
+        signal.pidfd_send_signal(fd, signal.SIGTERM)
+        poll = select.poll()
+        poll.register(fd, select.POLLIN)
+        if not poll.poll(10000):
+            raise SystemExit(f'Codex server did not stop for {home.name}')
+    except (FileNotFoundError, ProcessLookupError):
+        pass  # Server exited during inspection.
+    finally:
+        os.close(fd)
+
+
 def daemon(home, action):
     result = subprocess.run(
         ['/opt/codex/current/bin/codex', 'app-server', 'daemon', action],
@@ -117,7 +158,7 @@ def daemon(home, action):
     if result.returncode:
         # An interactive CLI can own the server at this profile's control socket.
         if action == 'stop' and 'app server is running but is not managed by codex app-server daemon' in result.stderr:
-            return
+            return stop_cli_server(home)
         raise SystemExit(result.stderr.strip() or result.stdout.strip() or f'Codex daemon {action} failed for {home.name}')
     if action in ('start', 'version'):
         return json.loads(result.stdout)
@@ -177,18 +218,31 @@ def handoff(key):
     with account_lock():
         target = prepare_profile(key)
         previous = BASE/'profiles'/selected()
-        started = daemon(target, 'start')
         current = BASE/'auth.json'
+        previous_link = current.readlink() if current.is_symlink() else None
+        started = daemon(target, 'start')
+        stopping_previous = False
         try:
             set_link(current, target/'auth.json')
-            if previous != target and (previous/'app-server-control/app-server-control.sock').exists():
-                daemon(previous, 'stop')
-        except (SystemExit, OSError, subprocess.SubprocessError):
+            # Stop the previous selection last so it remains available on rollback.
+            others = sorted((BASE/'profiles').iterdir(), key=lambda home: home == previous)
+            for home in others:
+                if home != target and home.is_dir() and not home.is_symlink() and server_pid(home) is not None:
+                    stopping_previous = home == previous
+                    daemon(home, 'stop')
+                    if server_pid(home) is not None:
+                        raise SystemExit(f'Codex server still running for {home.name}')
+        except (SystemExit, OSError, subprocess.SubprocessError, KeyboardInterrupt):
             if previous != target:
                 if current.is_symlink() and current.readlink() == target/'auth.json':
-                    set_link(current, previous/'auth.json')
+                    if previous_link is None:
+                        current.unlink()
+                    else:
+                        set_link(current, previous_link)
                 if started.get('status') == 'started':
                     daemon(target, 'stop')
+                if stopping_previous and server_pid(previous) is None:
+                    daemon(previous, 'start')
             raise
 
 
