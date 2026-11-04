@@ -6,7 +6,7 @@
 
 主机需要 Python 3、Docker 和已挂载的 SSD。
 
-- **WSL 2**　在管理员 PowerShell 中运行[接盘脚本](windows/Mount-AospDisk.ps1)。WSL 发行版通常使用 `/mnt/wsl/AOSP`。通过 Docker Desktop 的 Linux 主机运行管理器时，使用 `/run/desktop/mnt/host/wsl/AOSP`。
+- **WSL 2**　在 PowerShell 中运行[接盘脚本](windows/Mount-AospDisk.ps1)。SSD 未挂载时会请求管理员权限。WSL 发行版通常使用 `/mnt/wsl/AOSP`。通过 Docker Desktop 的 Linux 主机运行管理器时，使用 `/run/desktop/mnt/host/wsl/AOSP`。
 - **Ubuntu**　默认挂载到 `/mnt/aosp`。
 
 ```sh
@@ -128,6 +128,33 @@ adb -s <序列号> shell
 撤销会结束该用户以此账号运行的 Codex 进程。账号配置和对话保存在 SSD 的 `workspaces/<用户>/codex/`。
 
 ## 容器配置与维护
+
+### 启动与监控
+
+在 `manager/` 下恢复已有工作区并打开监控。
+
+| 环境 | 恢复全部 | 只恢复 gensoul |
+| --- | --- | --- |
+| Linux | `sudo python3 start.py` | `sudo python3 start.py --user gensoul` |
+| Windows PowerShell | `.\windows\Start-Workspaces.ps1` | `.\windows\Start-Workspaces.ps1 -User gensoul` |
+
+Linux 需要 Docker 服务已运行。脚本按配置中的 `disk_root` 挂载 SSD，恢复 AOSP 挂载和容器后打开面板。Windows 入口还会启动 Docker Desktop 并启用 WSL 交换空间，需要接盘时按提示授权。按 `Ctrl+C` 关闭监控，容器继续运行。
+
+单独查看监控也在 `manager/` 下运行。
+
+| 环境 | 启动面板 | 只看一次 | 指定用户 | 刷新间隔 |
+| --- | --- | --- | --- | --- |
+| Windows PowerShell | `.\windows\Monitor-Workspaces.ps1` | `-Once` | `-User gensoul` | `-Interval 10` |
+| Ubuntu / WSL Ubuntu | `python3 monitor.py` | `--once` | `--user gensoul` | `--interval 10` |
+
+界面默认每秒刷新，大小和额度每 60 秒更新。Linux 主机需要 Python 3 和 Docker 访问权限，可用 `--disk <挂载点>` 指定 SSD。
+
+- `WSL / Host` 的 CPU、RAM 进度条上半为 WSL，下半为 Windows。
+- `WORKSPACE` 是用户在 SSD 上的占用，排除挂载视图。`CONTAINER` 是容器可写层大小。
+- `CODEX` 列出授权账号，当前账号以青色加粗显示，纯文本用 `*` 标记。
+- `QUOTA` 中的 `12.5h : 54%` 表示距重置 12.5 小时，额度剩余 54%。`CREDITS` 中的 `36,047 (2, 18.5h)` 表示积分余额、可用重置次数及最近一次到期的剩余时间。
+
+### 配置与操作
 
 `cpus` 默认上限为 16 个逻辑 CPU，支持小数。`memory_gib` 默认上限为 32 GiB。省略字段使用默认值，设为 `null` 取消该项限制。
 

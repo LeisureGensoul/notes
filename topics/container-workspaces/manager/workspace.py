@@ -13,6 +13,7 @@ from host.version_mounts import detach, mounted, publish
 HERE = Path(__file__).resolve().parent
 CATALOG = dict(line.split() for line in (HERE / "default-baselines.tsv").read_text().splitlines())
 LABEL = "local-manager.workspace"
+SSD_UUID = "9fa88778-a01d-458f-932b-f59d3673e77d"
 SECCOMP_PROFILE = HERE / "docker/workspace-seccomp.json"
 
 
@@ -265,6 +266,7 @@ def main():
     parser.add_argument("action", choices="keygen login grant revoke create start stop sync rebuild delete delete-shared delete-user enter".split())
     parser.add_argument("subject", nargs="?", help="Version for enter or delete, relative path for delete-shared")
     parser.add_argument("--config", type=Path, default=HERE / "workspace.json")
+    parser.add_argument("--existing-only", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--account")
     parser.add_argument("--confirm")
     args = parser.parse_args()
@@ -297,7 +299,7 @@ def main():
     confirmations = {"delete": f"{user}/{args.subject}", "delete-user": user, "delete-shared": f"{user}/shared/{args.subject}"}
     if action in confirmations and args.confirm != confirmations[action]:
         raise ValueError(f"Deletion requires --confirm {confirmations[action]}")
-    if os.geteuid() != 0 or output("findmnt", "-rn", "-o", "UUID", "--mountpoint", root) != "9fa88778-a01d-458f-932b-f59d3673e77d":
+    if os.geteuid() != 0 or output("findmnt", "-rn", "-o", "UUID", "--mountpoint", root) != SSD_UUID:
         raise RuntimeError("Run as root with the AOSP SSD mounted")
     lock = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -360,6 +362,8 @@ def main():
                 raise ValueError(f"Container {name} belongs to another workspace")
             item = json.loads(output("docker", "inspect", name))[0]
 
+    if action == "start" and args.existing_only and item is None:
+        raise ValueError(f"No existing workspace container: {name}")
     saved = [p.name[5:] for p in sorted(home.glob("aosp-android-*")) if (p / ".local-manager").is_file()]
     if action == "stop":
         if item and item["State"]["Running"]:
@@ -468,7 +472,9 @@ def main():
             base_point.mkdir(exist_ok=True)
             publish(baseline, base_point / tag, readonly=True)
     if item:
-        if not item["State"]["Running"]:
+        if action == "start" and item["State"].get("Paused"):
+            run("docker", "unpause", name)
+        elif not item["State"]["Running"]:
             run("docker", "start", name)
         if action == "sync":
             print(f"{user}: mounted versions: {', '.join(versions) or '(none)'}")
