@@ -20,7 +20,9 @@
 
 旧 token 到期后返回 404, 旧 HY2 密码拒绝认证. 服务每 5 秒检查已有会话, 断开到期或额度耗尽的连接, 失败后重试. large 到期或撤销时, 对应四个 small 一并失效.
 
-额度按凭据身份独立累计, 上传与下载合计. 1 GB = 1,000,000,000 字节. 经 Tailnet 使用 large 或 small 也计入额度, 暂不限速.
+额度按凭据身份独立累计, 上传与下载合计. 1 GB = 1,000,000,000 字节. 经 Tailnet 使用 large 或 small 也计入额度.
+
+所有 HY2 节点使用 Brutal, 上传和下载目标速率均为 1000 Mbps. 服务端 UDP 收发缓冲区上限均为 16 MiB.
 
 small 按日重置, large 按周重置. 刷新, 恢复授权和服务重启不清零当期用量. large 额度用尽不扣减下级额度, 其有效 token 仍可读取下级配置.
 
@@ -203,6 +205,7 @@ install -o root -g caddy -m 0640 "$hy2_stage/files/etc/caddy/Caddyfile" /etc/cad
 caddy fmt --overwrite /etc/caddy/Caddyfile
 caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 nft -c -f /etc/nftables.d/hysteria.nft
+sysctl -p /etc/sysctl.d/99-hy2-udp-buffers.conf
 ip link set dev tailscale0 mtu 1360
 systemctl reload caddy
 systemctl enable --now hy2-subscriptions hysteria hy2-certificate.timer

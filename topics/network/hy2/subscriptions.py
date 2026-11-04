@@ -170,6 +170,7 @@ class Store:
             node = {'name': g['name'], 'type': 'hysteria2',
                     'server': self.config['tailnet_ip'] if g['tier'] == 'tailscale' else host,
                     'port': int(self.config.get('port', 8443)), 'password': g['password'],
+                    'up': '1000 Mbps', 'down': '1000 Mbps',
                     'obfs': 'gecko', 'obfs-password': self.config['obfs_password']}
             if g['tier'] == 'tailscale':
                 node['sni'] = host
